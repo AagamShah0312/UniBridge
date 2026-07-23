@@ -216,8 +216,8 @@ function uniq<T>(values: T[]) {
 }
 
 function objectUrl(fileKey: string) {
-  return env.STORAGE_BUCKET_URL
-    ? `${env.STORAGE_BUCKET_URL.replace(/\/$/, "")}/${fileKey}`
+  return env.STORAGE_BUCKET_URL && env.S3_BUCKET
+    ? `${env.STORAGE_BUCKET_URL.replace(/\/$/, "")}/${encodeURIComponent(env.S3_BUCKET)}/${fileKey.split("/").map(encodeURIComponent).join("/")}`
     : `/mock/${fileKey}`;
 }
 
@@ -3704,8 +3704,10 @@ export const portalService = {
   async studentSmartNoteSummary(studentId: string, universityId: string, noteId: string) {
     const note = await this.studentNote(studentId, universityId, noteId);
     const insight = await prisma.noteInsight.findUnique({ where: { noteId } });
-    if (!insight) {
-      await bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(noteId));
+    if (!insight || insight.status === "failed") {
+      const stored = await prisma.note.findUnique({ where: { id: noteId }, select: { fileKey: true } });
+      const sourceUrl = storageEnabled && stored?.fileKey ? presignGetUrl(stored.fileKey, 60 * 60) : undefined;
+      await bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(noteId, sourceUrl));
       if (!note.aiSummary) {
         return { noteId, noteTitle: note.title, subjectCode: note.subjectCode, status: "processing", summary: null, flashcards: [] };
       }
@@ -4304,7 +4306,7 @@ export const portalService = {
         status, releaseAt, targets: { create: batchIds.map((batchId) => ({ batchId })) },
       },
     });
-    await bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(note.id));
+    await bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(note.id, storageEnabled ? presignGetUrl(note.fileKey, 60 * 60) : undefined));
     if (status === "PUBLISHED") await this.notifyNotePublished(note.id);
     return { id: note.id, title: note.title, fileUrl: note.fileUrl, status, releaseAt, message: status === "SCHEDULED" ? "Note scheduled." : "Note published." };
   },
@@ -4346,8 +4348,8 @@ export const portalService = {
       // If rescheduled to now/past, publish immediately and notify.
       if (status === "PUBLISHED") { await prisma.note.update({ where: { id: noteId }, data }); await this.notifyNotePublished(noteId); return this.getFacultyNote(facultyId, noteId); }
     }
-    await prisma.note.update({ where: { id: noteId }, data });
-    if (fileBuffer) await bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(noteId));
+    const updated = await prisma.note.update({ where: { id: noteId }, data });
+    if (fileBuffer) await bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(noteId, storageEnabled ? presignGetUrl(updated.fileKey, 60 * 60) : undefined));
     return this.getFacultyNote(facultyId, noteId);
   },
 

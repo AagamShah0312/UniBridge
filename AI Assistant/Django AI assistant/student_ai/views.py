@@ -333,7 +333,8 @@ class InternalNoteProcessView(APIView):
     def post(self, request, note_id: str):
         note = Note.objects.get(pk=note_id)
         job = create_job("note_generation", {"note_id": note_id}, university_id=str(note.subject.university_id))
-        submit_job(job, generate_note_insight, note)
+        source_url = request.data.get("source_url") if isinstance(request.data, dict) else None
+        submit_job(job, generate_note_insight, note, source_url=source_url)
         return Response({"success": True, "message": "Note processing queued.", "data": {"note_id": note_id, "job_id": str(job.id), "status": "queued"}}, status=status.HTTP_202_ACCEPTED)
 
 

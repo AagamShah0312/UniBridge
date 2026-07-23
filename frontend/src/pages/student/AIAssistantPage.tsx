@@ -26,7 +26,7 @@ export default function AIAssistantPage() {
   const [analysisSubjectId, setAnalysisSubjectId] = useState('')
   const [text, setText] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
-  const missingSelectionNotified = useRef(false)
+  const intentionallyClosedChatId = useRef<string | null>(null)
 
   const conversations = useQuery({
     queryKey: ['student', 'ai-convs'],
@@ -73,17 +73,15 @@ export default function AIAssistantPage() {
     }
     if (!selectedId || !conversationItems.some((item) => item.id === selectedId)) {
       setSelectedId(conversationItems[0].id)
-      if (selectedId && !missingSelectionNotified.current) {
-        toast.error('The previous chat is no longer available. Opened the latest conversation instead.')
-        missingSelectionNotified.current = true
-      }
-    } else {
-      missingSelectionNotified.current = false
     }
   }, [conversationItems, selectedId])
 
   useEffect(() => {
     if (!conversation.isError) return
+    if (intentionallyClosedChatId.current) {
+      intentionallyClosedChatId.current = null
+      return
+    }
     const fallback = conversationItems.find((item) => item.id !== selectedId)
     setSelectedId(fallback?.id ?? null)
     toast.error(errorMessage(conversation.error, 'Could not open that conversation.'))
@@ -92,8 +90,9 @@ export default function AIAssistantPage() {
   const create = useMutation({
     mutationFn: () => studentApi.createAiConversation({ title: `Chat ${new Date().toLocaleString('en-IN')}`, subjectId: chatSubjectId || null }),
     onSuccess: async (created: { id: string }) => {
-      setSelectedId(created.id)
       await qc.invalidateQueries({ queryKey: ['student', 'ai-convs'] })
+      await qc.refetchQueries({ queryKey: ['student', 'ai-convs'] })
+      setSelectedId(created.id)
       await qc.invalidateQueries({ queryKey: ['student', 'ai-conv', created.id] })
     },
     onError: (e) => toast.error(errorMessage(e)),
@@ -112,10 +111,15 @@ export default function AIAssistantPage() {
   const del = useMutation({
     mutationFn: (id: string) => studentApi.deleteAiConversation(id),
     onSuccess: async (_value, id) => {
+      intentionallyClosedChatId.current = id
       setSelectedId((current) => (current === id ? null : current))
       await qc.invalidateQueries({ queryKey: ['student', 'ai-convs'] })
+      await qc.refetchQueries({ queryKey: ['student', 'ai-convs'] })
     },
-    onError: (e) => toast.error(errorMessage(e)),
+    onError: (e) => {
+      intentionallyClosedChatId.current = null
+      toast.error(errorMessage(e))
+    },
   })
 
   useEffect(() => {
@@ -199,12 +203,11 @@ export default function AIAssistantPage() {
               ) : (
                 <ul className="divide-y divide-border-light">
                   {conversationItems.map((item) => (
-                    <li key={item.id}>
+                    <li key={item.id} className={cn('group transition hover:bg-surface-2', selectedId === item.id && 'bg-primary-light')}>
                       <button
                         type="button"
                         className={cn(
-                          'group flex w-full items-start gap-2 px-3 py-3 text-left transition hover:bg-surface-2',
-                          selectedId === item.id && 'bg-primary-light',
+                          'flex w-full items-start gap-2 px-3 py-3 text-left',
                         )}
                         onClick={() => setSelectedId(item.id)}
                       >

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 import os
 from pathlib import Path
+import re
 import tempfile
 from urllib.parse import urlparse
 
@@ -11,6 +12,7 @@ from django.utils import timezone
 import requests
 
 from student_ai.models import AIDocument, AIDocumentChunk, AIDocumentMetadata, Flashcard, Note, NoteInsight
+from student_ai.services.ai_service import AIServiceError
 from student_ai.services.chunk_service import build_semantic_chunks
 from student_ai.services.documents import extract_text, file_hash
 from student_ai.services.embedding_service import EmbeddingService
@@ -29,8 +31,8 @@ def resolve_local_path(file_url: str, file_key: str) -> str | Path:
     return Path(settings.MEDIA_ROOT) / file_key
 
 
-def process_note_document(note: Note) -> dict:
-    path = resolve_local_path(note.file_url, note.file_key)
+def process_note_document(note: Note, *, source_url: str | None = None) -> dict:
+    path = resolve_local_path(source_url or note.file_url, note.file_key)
     digest = file_hash(path)
     document, _created = AIDocument.objects.update_or_create(
         note=note,
@@ -116,8 +118,39 @@ def _extract_note_structure(note: Note, extracted: str) -> dict:
         "Extract the structure, hierarchy, formulas, keywords, summaries, and student-ready notes.\n\n"
         f"{extracted[:24000]}"
     )
-    parsed = GeminiDocumentService().json_chat(system, user, fallback=fallback)
+    try:
+        parsed = GeminiDocumentService().json_chat(system, user, fallback=fallback)
+    except AIServiceError:
+        # Keep faculty material accessible when the optional LLM router is offline.
+        parsed = _extractive_note_structure(extracted)
     return {**fallback, **parsed}
+
+
+def _extractive_note_structure(extracted: str) -> dict:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", extracted) if part.strip()]
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", " ".join(paragraphs)) if part.strip()]
+    definitions: list[str] = []
+    for line in extracted.splitlines():
+        if ":" not in line:
+            continue
+        term, meaning = line.split(":", 1)
+        if term.strip() and meaning.strip() and len(term.strip()) <= 100:
+            definitions.append(f"{term.strip()}: {meaning.strip()}")
+    return {
+        "short_summary": " ".join(sentences[:3])[:1200] or extracted[:1200],
+        "detailed_notes": "\n\n".join(paragraphs)[:10000],
+        "bullet_notes": sentences[:8],
+        "important_definitions": definitions[:12],
+        "key_formulae": [],
+        "flashcards": [],
+        "important_questions": [sentence for sentence in sentences if sentence.endswith("?")][:10],
+        "units": [],
+        "chapters": [],
+        "keywords": [],
+        "prerequisites": [],
+        "tables": [],
+        "formulas": [],
+    }
 
 
 def extract_document_text(path: str | Path, mime_type: str | None = None) -> str:

@@ -4,11 +4,14 @@ import json
 import os
 import re
 import base64
+import logging
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from student_ai.services.ai_service import SharedAIService
+from student_ai.services.ai_service import AIServiceError, SharedAIService
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiDocumentService:
@@ -16,16 +19,20 @@ class GeminiDocumentService:
 
     def __init__(self) -> None:
         self.ai = SharedAIService(model=os.getenv("FREELLMAPI_DOCUMENT_MODEL") or None)
+        self.fallback_ai = SharedAIService()
 
     def json_chat(self, system: str, user: str, *, fallback: dict[str, Any]) -> dict[str, Any]:
-        reply = self.ai.chat(
-            [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.1,
-            response_format={"type": "json_object"},
-        )["reply"]
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        try:
+            reply = self.ai.chat(messages, temperature=0.1, response_format={"type": "json_object"})["reply"]
+        except AIServiceError:
+            if self.ai.model == self.fallback_ai.model:
+                raise
+            logger.warning("Configured document model failed; using the available text model for structured extraction.")
+            reply = self.fallback_ai.chat(messages, temperature=0.1, response_format={"type": "json_object"})["reply"]
         return _parse_json(reply, fallback)
 
     def extract_image_text(self, source: str | Path, *, mime_type: str | None = None) -> str:

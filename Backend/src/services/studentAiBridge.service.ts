@@ -92,8 +92,11 @@ export const studentAiBridge = {
     return requestStudent<Record<string, unknown>>(studentId, "students/me/marks/prediction");
   },
 
-  triggerNoteProcessing(noteId: string) {
-    return requestInternal<{ note_id: string; status: string; job_id?: string }>(`notes/${noteId}/process`, { method: "POST" });
+  triggerNoteProcessing(noteId: string, sourceUrl?: string) {
+    return requestInternal<{ note_id: string; status: string; job_id?: string }>(`notes/${noteId}/process`, {
+      method: "POST",
+      body: JSON.stringify(sourceUrl ? { source_url: sourceUrl } : {}),
+    });
   },
 
   triggerPyqProcessing(pyqId: string) {

@@ -37,17 +37,17 @@ def submit_job(job: BackgroundJob, func: Callable[..., dict[str, Any]], *args: A
     def runner() -> None:
         close_old_connections()
         try:
-            job.status = "processing"
+            job.status = "PROCESSING"
             job.progress = 10
             job.save(update_fields=["status", "progress", "updated_at"])
             result = func(*args, **kwargs)
-            job.status = "completed"
+            job.status = "COMPLETE"
             job.progress = 100
             job.result = result
             job.save(update_fields=["status", "progress", "result", "updated_at"])
         except Exception as exc:
             logger.exception("Background job %s failed", job.id)
-            job.status = "failed"
+            job.status = "FAILED"
             job.error = str(exc)
             job.save(update_fields=["status", "error", "updated_at"])
         finally:

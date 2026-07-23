@@ -59,14 +59,15 @@ function unwrapDjangoResponse<T>(payload: DjangoResponse<T>): T {
 }
 
 export function djangoAiErrorMessage(err: unknown, fallback = 'AI request failed'): string {
-  const ax = err as AxiosError<DjangoResponse<unknown> | ApiError>
+  const ax = err as AxiosError<DjangoResponse<unknown> | ApiError | string>
   const data = ax?.response?.data
-  if (data && 'error' in data) {
+  if (data && typeof data === 'object' && 'error' in data) {
     const error = data.error as { details?: string; message?: string } | undefined
     return error?.details ?? error?.message ?? fallback
   }
-  if (data && 'message' in data && typeof data.message === 'string') return data.message
+  if (data && typeof data === 'object' && 'message' in data && typeof data.message === 'string') return data.message
+  if (typeof data === 'string' && ax?.response?.status && ax.response.status >= 500) {
+    return 'The AI service is temporarily unavailable. Please try again.'
+  }
   return ax?.message ?? fallback
 }
-
-console.log("Django AI Base URL:", djangoAiApi.defaults.baseURL);

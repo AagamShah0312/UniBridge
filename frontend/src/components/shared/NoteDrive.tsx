@@ -1,4 +1,4 @@
-import { FileText, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Trash2, Upload } from 'lucide-react'
+import { FileText, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { cn } from '@/lib/utils'
@@ -60,7 +60,7 @@ export function NoteDrive({
             <FileText size={19} className="shrink-0 text-primary" />
             <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-text-primary">{file.title}</div><div className="truncate text-xs text-text-muted">{file.originalFileName ?? file.mimeType ?? 'file'}{file.uploadedBy ? ` · ${file.uploadedBy}` : ''}</div></div>
             <div className="hidden text-xs text-text-muted sm:block">{file.status === 'SCHEDULED' ? 'Scheduled' : ''}</div>
-            {onSummary && <Button size="sm" variant="ghost" onClick={() => onSummary(file)}>AI</Button>}
+            {onSummary && <Button size="sm" variant="ghost" className="h-8 w-8 px-0 text-primary hover:bg-primary-light" onClick={() => onSummary(file)} title="Generate AI summary" aria-label={`Generate AI summary for ${file.title}`}><Sparkles size={17} strokeWidth={2.25} /></Button>}
             {onDownload && <Button size="sm" variant="outline" onClick={() => onDownload(file)}>Open</Button>}
             {faculty && onEditFile && <button title="Edit" className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-primary" onClick={() => onEditFile(file)}><Pencil size={14} /></button>}
             {faculty && onDeleteFile && <button title="Delete" className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-danger" onClick={() => onDeleteFile(file)}><Trash2 size={14} /></button>}

@@ -331,7 +331,7 @@ class BackgroundJob(PrismaMirrorModel):
     university_id = models.UUIDField(db_column="universityId")
     student_id = models.UUIDField(null=True, blank=True, db_column="studentId")
     job_type = models.CharField(max_length=64, db_column="jobType")
-    status = models.CharField(max_length=32, default="queued")
+    status = models.CharField(max_length=32, default="QUEUED")
     progress = models.PositiveSmallIntegerField(default=0)
     payload = models.JSONField(default=dict)
     result = models.JSONField(default=dict)

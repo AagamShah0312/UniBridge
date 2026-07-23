@@ -14,18 +14,6 @@ type DjangoChat = {
   messages?: Array<{ role: string; content: string }>
 }
 
-type DjangoNoteInsight = {
-  note_id: string
-  short_summary?: string
-  detailed_notes?: string
-  bullet_notes?: string[]
-  important_definitions?: string[]
-  key_formulae?: string[]
-  important_questions?: string[]
-  status?: string
-  flashcards?: Array<{ question: string; answer: string }>
-}
-
 type DjangoPyqPrediction = {
   important_topics?: string[]
   frequently_asked_topics?: string[]
@@ -52,20 +40,6 @@ function normalizeMessages(chatId: string, messages: Array<{ role: string; conte
     content: message.content,
     createdAt: new Date().toISOString(),
   }))
-}
-
-function normalizeNoteInsight(data: DjangoNoteInsight) {
-  return {
-    noteId: data.note_id,
-    status: data.status ?? 'completed',
-    summary: data.short_summary ?? null,
-    detailedNotes: data.detailed_notes,
-    bulletNotes: data.bullet_notes ?? [],
-    importantDefinitions: data.important_definitions ?? [],
-    keyFormulae: data.key_formulae ?? [],
-    importantQuestions: data.important_questions ?? [],
-    flashcards: data.flashcards ?? [],
-  }
 }
 
 function normalizePyqPrediction(data: DjangoPyqPrediction, subjectId: string) {
@@ -181,10 +155,7 @@ export const studentApi = {
     const data = await djangoAiGet<DjangoPyqPrediction>(`/pyqs/subjects/${subjectId}/predictions`)
     return normalizePyqPrediction(data, subjectId)
   },
-  smartNoteSummary: async (noteId: string) => {
-    const data = await djangoAiGet<DjangoNoteInsight>(`/notes/${noteId}`)
-    return normalizeNoteInsight(data)
-  },
+  smartNoteSummary: (noteId: string) => api.get(`/student/ai/smart-notes/${noteId}/summary`).then((r) => r.data),
   marksPrediction: () => djangoAiGet('/students/me/marks/prediction'),
 
   studyPlanner: () => api.get('/student/study-planner').then((r) => r.data),
