@@ -4,6 +4,7 @@ from django.http import Http404
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
 
 from .models import AIConversation, BackgroundJob, Note, NoteInsight, PYQFile, PYQInsight, StudyPlan, StudyPlanTask, Student, StudentAIChatSession, StudentEnrollment, Subject
 from .permissions import InternalServicePermission, IsStudentScope
@@ -48,7 +49,7 @@ class StudentContextMixin:
 
 
 class HealthView(StudentContextMixin, APIView):
-    permission_classes = [IsStudentScope]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         try:
