@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import ChatDetailView, ChatListCreateView, ChatMessageView, HealthView, InternalNoteProcessView, InternalPYQProcessView, JobStatusView, MarksModelView, MarksPredictView, MarksRetrainView, NoteInsightView, PYQAnalysisView, PYQPredictionView, StudentMarksPredictionView, StudyPlanDetailView, StudyPlanListCreateView, StudyPlanRegenerateView, StudyPlanTaskCreateView, StudyPlanTaskView, SubjectNotesView
+from .views import ChatDetailView, ChatListCreateView, ChatMessageView, HealthView, InternalNoteProcessView, InternalPYQProcessView, InternalQuizChaptersView, InternalQuizGenerateView, JobStatusView, MarksModelView, MarksPredictView, MarksRetrainView, NoteInsightView, PYQAnalysisView, PYQPredictionView, StudentMarksPredictionView, StudyPlanDetailView, StudyPlanListCreateView, StudyPlanRegenerateView, StudyPlanTaskCreateView, StudyPlanTaskView, SubjectNotesView
 
 urlpatterns = [
     path("health", HealthView.as_view(), name="health"),
@@ -23,4 +23,6 @@ urlpatterns = [
     path("jobs/<uuid:job_id>", JobStatusView.as_view(), name="job-status"),
     path("internal/notes/<uuid:note_id>/process", InternalNoteProcessView.as_view(), name="internal-note-process"),
     path("internal/pyqs/<uuid:pyq_id>/process", InternalPYQProcessView.as_view(), name="internal-pyq-process"),
+    path("internal/quizzes/subjects/<uuid:subject_id>/chapters", InternalQuizChaptersView.as_view(), name="internal-quiz-chapters"),
+    path("internal/quizzes/generate", InternalQuizGenerateView.as_view(), name="internal-quiz-generate"),
 ]

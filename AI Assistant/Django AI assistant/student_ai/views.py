@@ -30,6 +30,7 @@ from .services.marks import get_marks_model_metadata, predict_marks, predict_stu
 from .services.notes import generate_note_insight
 from .services.planner import generate_study_plan
 from .services.pyq import analyze_pyq, predict_topic_trends
+from .services.quiz import available_chapters, generate_quiz
 
 
 class StudentContextMixin:
@@ -346,3 +347,27 @@ class InternalPYQProcessView(APIView):
         job = create_job("pyq_analysis", {"pyq_id": pyq_id}, university_id=str(pyq.subject.university_id))
         submit_job(job, analyze_pyq, pyq)
         return Response({"success": True, "message": "PYQ processing queued.", "data": {"pyq_id": pyq_id, "job_id": str(job.id), "status": "queued"}}, status=status.HTTP_202_ACCEPTED)
+
+
+class InternalQuizChaptersView(APIView):
+    permission_classes = [InternalServicePermission]
+
+    def get(self, request, subject_id: str):
+        return Response({"success": True, "message": "Quiz chapters fetched.", "data": {"chapters": available_chapters(subject_id)}})
+
+
+class InternalQuizGenerateView(APIView):
+    permission_classes = [InternalServicePermission]
+
+    def post(self, request):
+        body = request.data if isinstance(request.data, dict) else {}
+        try:
+            data = generate_quiz(
+                str(body.get("subject_id", "")),
+                body.get("chapters") if isinstance(body.get("chapters"), list) else [],
+                int(body.get("question_count", 10)),
+                str(body.get("seed", "practice")),
+            )
+        except (Subject.DoesNotExist, ValueError) as exc:
+            return Response({"success": False, "message": "Quiz generation failed.", "error": {"code": "QUIZ_GENERATION_FAILED", "details": str(exc)}}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        return Response({"success": True, "message": "Quiz generated.", "data": data}, status=status.HTTP_201_CREATED)

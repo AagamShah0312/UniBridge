@@ -536,6 +536,7 @@ model Student {
   mentorAssignments     MentorAssignment[]
   selfNotes             SelfNote[]
   quizAttempts          QuizAttempt[]
+  generatedQuizzes      Quiz[]                 @relation("StudentGeneratedQuizzes")
   aiConversations       AIConversation[]
   aiChatSessions        StudentAIChatSession[]
   studyPlans            StudyPlan[]
@@ -851,7 +852,8 @@ model PYQAnalysis {
 
 model Quiz {
   id            String    @id @default(uuid()) @db.Uuid
-  facultyId     String    @db.Uuid
+  facultyId     String?   @db.Uuid
+  studentId     String?   @db.Uuid // Set for private student-generated practice quizzes.
   subjectId     String    @db.Uuid
   semesterId    String    @db.Uuid
   title         String
@@ -860,11 +862,14 @@ model Quiz {
   isPublished   Boolean   @default(false)
   dueDate       DateTime?
   timeLimitMins Int? // null = untimed
+  maxAttempts   Int       @default(1)
+  chapterNames  Json      @default("[]")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
 
-  faculty   Faculty           @relation(fields: [facultyId], references: [id])
+  faculty   Faculty?          @relation(fields: [facultyId], references: [id])
+  student   Student?          @relation("StudentGeneratedQuizzes", fields: [studentId], references: [id], onDelete: Cascade)
   subject   Subject           @relation(fields: [subjectId], references: [id])
   semester  Semester          @relation(fields: [semesterId], references: [id])
   questions Question[]
@@ -873,6 +878,7 @@ model Quiz {
 
   @@index([subjectId, semesterId])
   @@index([facultyId])
+  @@index([studentId, createdAt])
   @@map("quizzes")
 }
 
@@ -923,12 +929,15 @@ model QuizAttempt {
   quizId      String   @db.Uuid
   score       Float // percentage score
   answers     Json // { "q_id_1": "B", "q_id_2": "A" }
+  attemptNumber Int
+  presentation  Json     @default("{}") // Question and option order shown to this student.
   submittedAt DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id])
   quiz    Quiz    @relation(fields: [quizId], references: [id])
 
-  @@unique([studentId, quizId])
+  @@unique([studentId, quizId, attemptNumber])
+  @@index([studentId, quizId])
   @@index([quizId])
   @@map("quiz_attempts")
 }

@@ -289,6 +289,14 @@ studentRouter.get("/ai/marks-prediction", asyncHandler(async (req, res) => {
   res.json(await portalService.studentMarksPrediction(req.user!.id));
 }));
 
+studentRouter.get("/quizzes/subjects/:subjectId/chapters", asyncHandler(async (req, res) => {
+  res.json(await portalService.studentQuizChapters(req.user!.id, req.user!.universityId, str(req.params.subjectId)));
+}));
+
+studentRouter.post("/quizzes/ai-generate", asyncHandler(async (req, res) => {
+  res.status(201).json(await portalService.createStudentAiQuiz(req.user!.id, req.user!.universityId, req.body));
+}));
+
 studentRouter.get("/study-planner/ai-status/:jobId", asyncHandler(async (req, res) => {
   res.json(await portalService.studentStudyPlannerAiStatus(str(req.params.jobId)));
 }));
