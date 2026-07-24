@@ -3308,7 +3308,12 @@ export const portalService = {
     const random = () => { cursor = (cursor * 1664525 + 1013904223 + seed.charCodeAt(cursor % seed.length)) >>> 0; return cursor / 0x100000000; };
     for (const char of seed) cursor = ((cursor * 31) + char.charCodeAt(0)) >>> 0;
     const shuffle = <T,>(items: T[]) => [...items].sort(() => random() - 0.5);
-    const questions = shuffle(rawQuestions).map((question) => ({ ...question, options: shuffle(question.options as Array<{ id: string; text: string }>) }));
+    const questions = shuffle(rawQuestions).map((question) => ({
+      ...question,
+      // The underlying option id remains stable for scoring; labels are reset
+      // after each shuffle so every student always sees A, B, C, D in order.
+      options: shuffle(question.options as Array<{ id: string; text: string }>).map((option, index) => ({ ...option, label: String.fromCharCode(65 + index) })),
+    }));
     const startedAt = new Date().toISOString();
     const expiresAt = new Date(Date.now() + (quiz.timeLimitMins ?? 0) * 60000).toISOString();
     return { attemptId: `att_${Date.now()}`, attemptNumber: attemptsTaken + 1, quizId, title: quiz.title, timeLimitMins: quiz.timeLimitMins, startedAt, expiresAt, questions };
@@ -3342,7 +3347,7 @@ export const portalService = {
       const options = q.options as Array<{ id: string; text: string }>;
       const optionOrder = presentation.optionOrder?.[q.id] ?? options.map((option) => option.id);
       const optionMap = new Map(options.map((option) => [option.id, option]));
-      return { questionId: q.id, questionText: q.text, options: optionOrder.map((id) => optionMap.get(id)).filter(Boolean), selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation };
+      return { questionId: q.id, questionText: q.text, options: optionOrder.map((id, index) => { const option = optionMap.get(id); return option ? { ...option, label: String.fromCharCode(65 + index) } : null; }).filter(Boolean), selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation };
     });
     const correctCount = results.filter((r) => r.isCorrect).length;
     const totalAttempts = await prisma.quizAttempt.count({ where: { studentId, quizId } });
@@ -3383,6 +3388,12 @@ export const portalService = {
     const subject = await subjectById(body.subjectId);
     const quiz = await prisma.quiz.create({ data: { studentId, subjectId: body.subjectId, semesterId: semester.id, title: `${subject.code} AI practice quiz`, description: `Generated from: ${chapters.join(", ")}`, isAiGenerated: true, isPublished: true, maxAttempts: 3, chapterNames: chapters, questions: { create: generated.questions.map((question, index) => ({ text: question.text, options: question.options.map((text, optionIndex) => ({ id: String.fromCharCode(65 + optionIndex), text })), correctOption: String.fromCharCode(65 + question.correct_index), explanation: question.explanation || null, order: index })) } }, include: { _count: { select: { questions: true } } } });
     return { id: quiz.id, title: quiz.title, questionCount: quiz._count.questions, maxAttempts: quiz.maxAttempts };
+  },
+
+  async deleteStudentAiQuiz(studentId: string, quizId: string) {
+    const quiz = await prisma.quiz.findFirst({ where: { id: quizId, studentId, isAiGenerated: true } });
+    if (!quiz) throw new ApiError(404, "NOT_FOUND", "AI practice quiz not found.");
+    await prisma.quiz.delete({ where: { id: quizId } });
   },
 
   // ── Student — Announcements ───────────────────────────────

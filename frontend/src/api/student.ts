@@ -114,6 +114,7 @@ export const studentApi = {
   quizChapters: (subjectId: string) => api.get(`/student/quizzes/subjects/${subjectId}/chapters`).then((r) => r.data as { chapters: string[] }),
   generateAiQuiz: (body: { subjectId: string; chapters: string[]; questionCount?: number }) =>
     api.post('/student/quizzes/ai-generate', body).then((r) => r.data),
+  deleteAiQuiz: (id: string) => api.delete(`/student/quizzes/${id}/ai-practice`).then((r) => r.data),
 
   announcements: (params?: Params) =>
     api.get<T.PaginatedAnnouncements>('/student/announcements', { params }).then((r) => r.data),

@@ -70,10 +70,12 @@ def generate_quiz(subject_id: str, chapters: list[str], question_count: int, see
     if not chunks:
         raise ValueError("No processed faculty-note chunks are available for the selected chapters.")
 
+    # Keep synchronous quiz generation below the web client's timeout. If the
+    # provider cannot answer quickly, the note-grounded local fallback is used.
     context = "\n\n".join(
         f"[Chapter: {chunk.chapter_name or chunk.unit_name or chunk.document.title}]\n{chunk.content}"
         for chunk in chunks
-    )[:50000]
+    )[:12000]
     requested = max(4, min(int(question_count or 10), 20))
     system = "You create accurate university practice MCQs from faculty notes. Return JSON only."
     prompt = f"""Create exactly {requested} different MCQs for {subject.code} - {subject.name}.
@@ -86,7 +88,12 @@ FACULTY NOTE CONTEXT:
 """
     questions: list[dict] = []
     try:
-        payload = GeminiDocumentService().json_chat(system, prompt, {"questions": []})
+        service = GeminiDocumentService()
+        service.ai.timeout = 8
+        service.ai.max_retries = 1
+        service.fallback_ai.timeout = 8
+        service.fallback_ai.max_retries = 1
+        payload = service.json_chat(system, prompt, fallback={"questions": []})
         for item in payload.get("questions", []) if isinstance(payload, dict) else []:
             options = item.get("options") if isinstance(item, dict) else None
             correct = item.get("correct_index") if isinstance(item, dict) else None

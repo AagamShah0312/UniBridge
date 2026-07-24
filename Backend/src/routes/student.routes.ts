@@ -164,6 +164,11 @@ studentRouter.post("/quizzes/ai-generate", asyncHandler(async (req, res) => {
   res.status(201).json(await portalService.createStudentAiQuiz(req.user!.id, req.user!.universityId, req.body));
 }));
 
+studentRouter.delete("/quizzes/:quizId/ai-practice", asyncHandler(async (req, res) => {
+  await portalService.deleteStudentAiQuiz(req.user!.id, str(req.params.quizId));
+  res.status(204).send();
+}));
+
 studentRouter.get("/quizzes/history", asyncHandler(async (req, res) => {
   res.json(await portalService.studentQuizHistory(req.user!.id, req.user!.universityId, req.query as Record<string, string | number | undefined>));
 }));
