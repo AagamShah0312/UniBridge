@@ -929,7 +929,7 @@ model QuizAttempt {
   quizId      String   @db.Uuid
   score       Float // percentage score
   answers     Json // { "q_id_1": "B", "q_id_2": "A" }
-  attemptNumber Int
+  attemptNumber Int      @default(1)
   presentation  Json     @default("{}") // Question and option order shown to this student.
   submittedAt DateTime @default(now())
 

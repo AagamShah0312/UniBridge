@@ -6,6 +6,7 @@ import { generateStudyPlanForStudent, getLatestStudyPlan, refreshStudyPlanAfterP
 import type { Role, YearLevel } from "../types/domain.js";
 import type { ExportTable } from "../utils/export.js";
 import { ApiError, buildPagination } from "../utils/http.js";
+import type { Prisma } from "@prisma/client";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -3269,12 +3270,13 @@ export const portalService = {
     const { semester, enrollment } = await getStudentEnrollment(studentId, universityId, query.semesterId as string | undefined);
     const subjectIds = await getStudentSubjectIds(studentId, universityId, semester.id);
     const now = new Date();
-    const quizzes = await prisma.quiz.findMany({ where: { isPublished: true, deletedAt: null, semesterId: semester.id, subjectId: { in: subjectIds }, targets: { some: { batchId: enrollment.batchId } } }, include: { _count: { select: { questions: true } }, attempts: { where: { studentId }, select: { score: true, submittedAt: true } } } });
+    const quizzes = await prisma.quiz.findMany({ where: { isPublished: true, deletedAt: null, semesterId: semester.id, subjectId: { in: subjectIds }, OR: [{ studentId }, { studentId: null, targets: { some: { batchId: enrollment.batchId } } }] }, include: { subject: { select: { code: true, name: true } }, _count: { select: { questions: true } }, attempts: { where: { studentId }, select: { score: true, submittedAt: true, attemptNumber: true } } } });
     const rows = quizzes.map((quiz) => {
-      const attempt = quiz.attempts[0];
+      const bestScore = quiz.attempts.length ? Math.max(...quiz.attempts.map((attempt) => attempt.score)) : null;
       const expired = Boolean(quiz.dueDate && quiz.dueDate < now);
-      const status = attempt ? "ATTEMPTED" : expired ? "EXPIRED" : "PENDING";
-      return { id: quiz.id, title: quiz.title, subjectId: quiz.subjectId, semesterId: quiz.semesterId, questionCount: quiz._count.questions, timeLimitMins: quiz.timeLimitMins, isAiGenerated: quiz.isAiGenerated, dueDate: quiz.dueDate, status, attemptedAt: attempt?.submittedAt ?? null, score: attempt?.score ?? null };
+      const attemptsTaken = quiz.attempts.length;
+      const status = attemptsTaken >= quiz.maxAttempts ? "ATTEMPTED" : expired ? "EXPIRED" : attemptsTaken ? "RETRY" : "PENDING";
+      return { id: quiz.id, title: quiz.title, description: quiz.description, subject: quiz.subject, subjectId: quiz.subjectId, semesterId: quiz.semesterId, questionCount: quiz._count.questions, timeLimitMins: quiz.timeLimitMins, isAiGenerated: quiz.isAiGenerated, isStudentGenerated: quiz.studentId === studentId, chapters: quiz.chapterNames, maxAttempts: quiz.maxAttempts, attemptsTaken, dueDate: quiz.dueDate, status, attemptedAt: quiz.attempts[0]?.submittedAt ?? null, score: bestScore };
     });
     return paginate(
       rows.filter((r) => !query.subjectId || r.subjectId === query.subjectId).filter((r) => !query.status || r.status === query.status).map(({ subjectId: _, semesterId: __, ...rest }) => rest),
@@ -3284,53 +3286,67 @@ export const portalService = {
 
   async studentQuiz(studentId: string, universityId: string, quizId: string) {
     const { enrollment } = await getStudentEnrollment(studentId, universityId);
-    const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, targets: { some: { batchId: enrollment.batchId } } }, include: { _count: { select: { questions: true } } } });
+    const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, OR: [{ studentId }, { studentId: null, targets: { some: { batchId: enrollment.batchId } } }] }, include: { _count: { select: { questions: true } }, attempts: { where: { studentId }, select: { score: true } } } });
     if (!quiz) throw new ApiError(404, "NOT_FOUND", "Quiz not found.");
     await ensureStudentSubject(studentId, universityId, quiz.subjectId, quiz.semesterId);
     if (quiz.dueDate && quiz.dueDate < new Date()) throw new ApiError(410, "QUIZ_EXPIRED", "Quiz due date has passed.");
-    const attempt = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
     const subject = await subjectById(quiz.subjectId);
-    return { id: quiz.id, title: quiz.title, description: quiz.description, subjectCode: subject.code, questionCount: quiz._count.questions, timeLimitMins: quiz.timeLimitMins, dueDate: quiz.dueDate, isAiGenerated: quiz.isAiGenerated, status: attempt ? "ATTEMPTED" : "PENDING", alreadyAttempted: Boolean(attempt) };
+    return { id: quiz.id, title: quiz.title, description: quiz.description, subjectCode: subject.code, questionCount: quiz._count.questions, timeLimitMins: quiz.timeLimitMins, dueDate: quiz.dueDate, isAiGenerated: quiz.isAiGenerated, chapters: quiz.chapterNames, maxAttempts: quiz.maxAttempts, attemptsTaken: quiz.attempts.length, score: quiz.attempts.length ? Math.max(...quiz.attempts.map((attempt) => attempt.score)) : null, status: quiz.attempts.length >= quiz.maxAttempts ? "ATTEMPTED" : "PENDING" };
   },
 
   async startStudentQuiz(studentId: string, universityId: string, quizId: string) {
     const { enrollment } = await getStudentEnrollment(studentId, universityId);
-    const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, targets: { some: { batchId: enrollment.batchId } } } });
+    const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, OR: [{ studentId }, { studentId: null, targets: { some: { batchId: enrollment.batchId } } }] } });
     if (!quiz) throw new ApiError(404, "NOT_FOUND", "Quiz not found.");
     await ensureStudentSubject(studentId, universityId, quiz.subjectId, quiz.semesterId);
-    const existing = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
-    if (existing) throw new ApiError(409, "ALREADY_ATTEMPTED", "Quiz already attempted.");
+    const attemptsTaken = await prisma.quizAttempt.count({ where: { studentId, quizId } });
+    if (attemptsTaken >= quiz.maxAttempts) throw new ApiError(409, "ATTEMPT_LIMIT_REACHED", "No quiz attempts remain.");
     if (quiz.dueDate && quiz.dueDate < new Date()) throw new ApiError(410, "QUIZ_EXPIRED", "Quiz due date has passed.");
-    const questions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" }, select: { id: true, order: true, text: true, options: true } });
+    const rawQuestions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" }, select: { id: true, order: true, text: true, options: true } });
+    const seed = `${studentId}:${quizId}:${attemptsTaken + 1}`;
+    let cursor = 0;
+    const random = () => { cursor = (cursor * 1664525 + 1013904223 + seed.charCodeAt(cursor % seed.length)) >>> 0; return cursor / 0x100000000; };
+    for (const char of seed) cursor = ((cursor * 31) + char.charCodeAt(0)) >>> 0;
+    const shuffle = <T,>(items: T[]) => [...items].sort(() => random() - 0.5);
+    const questions = shuffle(rawQuestions).map((question) => ({ ...question, options: shuffle(question.options as Array<{ id: string; text: string }>) }));
     const startedAt = new Date().toISOString();
     const expiresAt = new Date(Date.now() + (quiz.timeLimitMins ?? 0) * 60000).toISOString();
-    return { attemptId: `att_${Date.now()}`, quizId, title: quiz.title, timeLimitMins: quiz.timeLimitMins, startedAt, expiresAt, questions };
+    return { attemptId: `att_${Date.now()}`, attemptNumber: attemptsTaken + 1, quizId, title: quiz.title, timeLimitMins: quiz.timeLimitMins, startedAt, expiresAt, questions };
   },
 
-  async submitStudentQuiz(studentId: string, universityId: string, quizId: string, answers: Record<string, string>) {
+  async submitStudentQuiz(studentId: string, universityId: string, quizId: string, answers: Record<string, string>, presentation: Record<string, unknown> = {}) {
     const { enrollment } = await getStudentEnrollment(studentId, universityId);
-    const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, targets: { some: { batchId: enrollment.batchId } } } });
+    const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, OR: [{ studentId }, { studentId: null, targets: { some: { batchId: enrollment.batchId } } }] } });
     if (!quiz) throw new ApiError(404, "NOT_FOUND", "Quiz not found.");
     await ensureStudentSubject(studentId, universityId, quiz.subjectId, quiz.semesterId);
-    const existing = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
-    if (existing) throw new ApiError(409, "ALREADY_SUBMITTED", "Quiz already submitted.");
+    const attemptsTaken = await prisma.quizAttempt.count({ where: { studentId, quizId } });
+    if (attemptsTaken >= quiz.maxAttempts) throw new ApiError(409, "ATTEMPT_LIMIT_REACHED", "No quiz attempts remain.");
     const questions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" } });
     if (questions.some((q) => !answers[q.id])) throw new ApiError(400, "MISSING_ANSWERS", "Some quiz questions are unanswered.");
-    const results = questions.map((q) => ({ questionId: q.id, questionText: q.text, selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation }));
+    const results = questions.map((q) => ({ questionId: q.id, questionText: q.text, options: q.options, selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation }));
     const correctCount = results.filter((r) => r.isCorrect).length;
     const score = questions.length === 0 ? 0 : Number(((correctCount / questions.length) * 100).toFixed(1));
-    const attempt = await prisma.quizAttempt.create({ data: { studentId, quizId, score, answers } });
-    return { attemptId: attempt.id, score, correctCount, incorrectCount: questions.length - correctCount, totalQuestions: questions.length, submittedAt: attempt.submittedAt, results };
+    const attempt = await prisma.quizAttempt.create({ data: { studentId, quizId, score, answers, attemptNumber: attemptsTaken + 1, presentation: presentation as Prisma.InputJsonValue } });
+    return { quizId, attemptId: attempt.id, score, correctCount, incorrectCount: questions.length - correctCount, totalQuestions: questions.length, submittedAt: attempt.submittedAt, attemptsTaken: attemptsTaken + 1, maxAttempts: quiz.maxAttempts, results };
   },
 
   async studentQuizResult(studentId: string, quizId: string) {
-    const attempt = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
+    const attempt = await prisma.quizAttempt.findFirst({ where: { studentId, quizId }, orderBy: { score: "desc" } });
     if (!attempt) throw new ApiError(404, "NOT_FOUND", "Quiz attempt not found.");
     const questions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" } });
     const answers = attempt.answers as Record<string, string>;
-    const results = questions.map((q) => ({ questionId: q.id, questionText: q.text, selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation }));
+    const presentation = attempt.presentation as { questionOrder?: string[]; optionOrder?: Record<string, string[]> };
+    const byId = new Map(questions.map((question) => [question.id, question]));
+    const orderedQuestions = (presentation.questionOrder ?? questions.map((question) => question.id)).map((id) => byId.get(id)).filter(Boolean) as typeof questions;
+    const results = orderedQuestions.map((q) => {
+      const options = q.options as Array<{ id: string; text: string }>;
+      const optionOrder = presentation.optionOrder?.[q.id] ?? options.map((option) => option.id);
+      const optionMap = new Map(options.map((option) => [option.id, option]));
+      return { questionId: q.id, questionText: q.text, options: optionOrder.map((id) => optionMap.get(id)).filter(Boolean), selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation };
+    });
     const correctCount = results.filter((r) => r.isCorrect).length;
-    return { attemptId: attempt.id, score: attempt.score, correctCount, incorrectCount: questions.length - correctCount, totalQuestions: questions.length, submittedAt: attempt.submittedAt, results };
+    const totalAttempts = await prisma.quizAttempt.count({ where: { studentId, quizId } });
+    return { attemptId: attempt.id, score: attempt.score, correctCount, incorrectCount: questions.length - correctCount, totalQuestions: questions.length, submittedAt: attempt.submittedAt, attemptsTaken: totalAttempts, results };
   },
 
   async studentQuizHistory(studentId: string, universityId: string, query: Record<string, string | number | undefined>) {
@@ -3339,11 +3355,34 @@ export const portalService = {
       include: { quiz: { include: { _count: { select: { questions: true } } } } },
       orderBy: { submittedAt: "desc" },
     });
-    const rows = attempts
-      .filter((a) => !query.subjectId || a.quiz.subjectId === query.subjectId)
-      .filter((a) => !query.semesterId || a.quiz.semesterId === query.semesterId)
-      .map((a) => ({ quizId: a.quizId, title: a.quiz.title, score: a.score, totalQuestions: a.quiz._count.questions, submittedAt: a.submittedAt }));
+    const grouped = new Map<string, typeof attempts[number][]>();
+    for (const attempt of attempts) grouped.set(attempt.quizId, [...(grouped.get(attempt.quizId) ?? []), attempt]);
+    const rows = [...grouped.values()]
+      .filter((quizAttempts) => !query.subjectId || quizAttempts[0].quiz.subjectId === query.subjectId)
+      .filter((quizAttempts) => !query.semesterId || quizAttempts[0].quiz.semesterId === query.semesterId)
+      .map((quizAttempts) => { const latest = quizAttempts[0]; return { quizId: latest.quizId, name: latest.quiz.title, marks: Math.max(...quizAttempts.map((attempt) => attempt.score)), attemptsTaken: quizAttempts.length, maxAttempts: latest.quiz.maxAttempts }; });
     return paginate(rows, Number(query.page ?? 1), Number(query.limit ?? 20));
+  },
+
+  async studentQuizChapters(studentId: string, universityId: string, subjectId: string) {
+    await ensureStudentSubject(studentId, universityId, subjectId);
+    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
+    const data = await studentAiBridge.getQuizChapters(subjectId);
+    return data ?? { chapters: [] };
+  },
+
+  async createStudentAiQuiz(studentId: string, universityId: string, body: { subjectId?: string; chapters?: string[]; questionCount?: number }) {
+    if (!body.subjectId) throw new ApiError(400, "SUBJECT_REQUIRED", "Choose a subject.");
+    await ensureStudentSubject(studentId, universityId, body.subjectId);
+    const { semester } = await getStudentEnrollment(studentId, universityId);
+    const chapters = [...new Set((body.chapters ?? []).map((chapter) => String(chapter).trim()).filter(Boolean))];
+    if (!chapters.length) throw new ApiError(400, "CHAPTER_REQUIRED", "Choose at least one chapter.");
+    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
+    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
+    if (!generated?.questions?.length) throw new ApiError(422, "QUIZ_GENERATION_FAILED", "No questions could be generated from the selected notes.");
+    const subject = await subjectById(body.subjectId);
+    const quiz = await prisma.quiz.create({ data: { studentId, subjectId: body.subjectId, semesterId: semester.id, title: `${subject.code} AI practice quiz`, description: `Generated from: ${chapters.join(", ")}`, isAiGenerated: true, isPublished: true, maxAttempts: 3, chapterNames: chapters, questions: { create: generated.questions.map((question, index) => ({ text: question.text, options: question.options.map((text, optionIndex) => ({ id: String.fromCharCode(65 + optionIndex), text })), correctOption: String.fromCharCode(65 + question.correct_index), explanation: question.explanation || null, order: index })) } }, include: { _count: { select: { questions: true } } } });
+    return { id: quiz.id, title: quiz.title, questionCount: quiz._count.questions, maxAttempts: quiz.maxAttempts };
   },
 
   // ── Student — Announcements ───────────────────────────────
