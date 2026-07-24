@@ -33,6 +33,11 @@ export default function StudentQuizzesPage() {
   const start = useMutation({ mutationFn: studentApi.startQuiz, onSuccess: (data) => { setAnswers({}); setActiveAttempt(data) } })
   const submit = useMutation({ mutationFn: ({ id, selected, presentation }: { id: string; selected: Record<string, string>; presentation: unknown }) => studentApi.submitQuiz(id, selected, presentation), onSuccess: (data) => { setActiveAttempt(null); setResult(data); refresh() } })
   const loadReview = useMutation({ mutationFn: studentApi.quizResult, onSuccess: setReview })
+  const subjectRows = Array.isArray(subjects.data)
+    ? subjects.data
+    : Array.isArray((subjects.data as { subjects?: unknown } | undefined)?.subjects)
+      ? (subjects.data as { subjects: Array<{ id: string; code: string; name: string }> }).subjects
+      : []
 
   const toggleChapter = (chapter: string) => setSelectedChapters((current) => current.includes(chapter) ? current.filter((item) => item !== chapter) : [...current, chapter])
   const openAttempt = (quiz: StudentQuiz) => start.mutate(quiz.id)
@@ -56,7 +61,7 @@ export default function StudentQuizzesPage() {
       </div>
 
       <Modal open={generatorOpen} onClose={() => setGeneratorOpen(false)} title="Generate AI practice quiz" subtitle="Questions are created only from processed faculty notes." size="md" footer={<><Button variant="outline" onClick={() => setGeneratorOpen(false)}>Cancel</Button><Button loading={generate.isPending} disabled={!subjectId || !selectedChapters.length} onClick={() => generate.mutate({ subjectId, chapters: selectedChapters })}>Generate MCQs</Button></>}>
-        <label className="mb-1 block text-xs font-semibold text-text-secondary">Subject</label><Select value={subjectId} onChange={(event) => { setSubjectId(event.target.value); setSelectedChapters([]) }} placeholder="Choose a subject" options={(subjects.data?.data ?? subjects.data ?? []).map((subject: { id: string; code: string; name: string }) => ({ value: subject.id, label: `${subject.code} - ${subject.name}` }))} />
+        <label className="mb-1 block text-xs font-semibold text-text-secondary">Subject</label><Select value={subjectId} onChange={(event) => { setSubjectId(event.target.value); setSelectedChapters([]) }} placeholder="Choose a subject" options={subjectRows.map((subject: { id: string; code: string; name: string }) => ({ value: subject.id, label: `${subject.code} - ${subject.name}` }))} />
         {subjectId && <div className="mt-5"><div className="mb-2 text-xs font-semibold text-text-secondary">Chapters</div>{chapters.isLoading ? <p className="text-xs text-text-muted">Loading processed note chapters...</p> : chapters.data?.chapters.length ? <div className="grid gap-2 sm:grid-cols-2">{chapters.data.chapters.map((chapter) => <label key={chapter} className="flex cursor-pointer items-center gap-2 rounded-sm border border-border p-3 text-xs text-text-primary hover:border-primary"><input type="checkbox" checked={selectedChapters.includes(chapter)} onChange={() => toggleChapter(chapter)} className="h-4 w-4 accent-primary" />{chapter}</label>)}</div> : <p className="rounded-sm bg-surface-2 p-3 text-xs text-text-muted">No processed faculty notes exist for this subject yet.</p>}</div>}
         {generate.error && <p className="mt-3 text-xs text-danger">{generate.error instanceof Error ? generate.error.message : 'Unable to generate the quiz.'}</p>}
       </Modal>
