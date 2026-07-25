@@ -2970,7 +2970,8 @@ export const portalService = {
     const ids = enrollments.map((e) => e.id);
     const lockedCount = await prisma.attendanceRecord.count({ where: { enrollmentId: { in: ids }, isLocked: true } });
     if (lockedCount > 0) return { deletedCount: 0, blocked: true, reason: `${lockedCount} records are locked. Unlock before deleting.` };
-    const { count } = await prisma.attendanceRecord.deleteMany({ where: { enrollmentId: { in: ids } } });
+    // Soft delete — the rows stay for audit/transcripts; live reads filter deletedAt: null.
+    const { count } = await prisma.attendanceRecord.updateMany({ where: { enrollmentId: { in: ids }, deletedAt: null }, data: { deletedAt: new Date() } });
     return { deletedCount: count, blocked: false };
   },
 
@@ -3397,9 +3398,11 @@ export const portalService = {
     if (!quiz) throw new ApiError(404, "NOT_FOUND", "Quiz not found.");
     await ensureStudentSubject(studentId, universityId, quiz.subjectId, quiz.semesterId);
     if (quiz.dueDate && quiz.dueDate < new Date()) throw new ApiError(410, "QUIZ_EXPIRED", "Quiz due date has passed.");
-    const attempt = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
+    // Retakes are separate rows now — the newest attempt is the current state.
+    const attempt = await prisma.quizAttempt.findFirst({ where: { studentId, quizId }, orderBy: { attemptNumber: "desc" } });
+    const attemptsUsed = await prisma.quizAttempt.count({ where: { studentId, quizId } });
     const subject = await subjectById(quiz.subjectId);
-    return { id: quiz.id, title: quiz.title, description: quiz.description, subjectCode: subject.code, questionCount: quiz._count.questions, timeLimitMins: quiz.timeLimitMins, dueDate: quiz.dueDate, isAiGenerated: quiz.isAiGenerated, status: attempt ? "ATTEMPTED" : "PENDING", alreadyAttempted: Boolean(attempt) };
+    return { id: quiz.id, title: quiz.title, description: quiz.description, subjectCode: subject.code, questionCount: quiz._count.questions, timeLimitMins: quiz.timeLimitMins, dueDate: quiz.dueDate, isAiGenerated: quiz.isAiGenerated, status: attempt ? "ATTEMPTED" : "PENDING", alreadyAttempted: attemptsUsed >= quiz.maxAttempts, attemptsUsed, maxAttempts: quiz.maxAttempts };
   },
 
   async startStudentQuiz(studentId: string, universityId: string, quizId: string) {
@@ -3407,8 +3410,8 @@ export const portalService = {
     const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, targets: { some: { batchId: enrollment.batchId } } } });
     if (!quiz) throw new ApiError(404, "NOT_FOUND", "Quiz not found.");
     await ensureStudentSubject(studentId, universityId, quiz.subjectId, quiz.semesterId);
-    const existing = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
-    if (existing) throw new ApiError(409, "ALREADY_ATTEMPTED", "Quiz already attempted.");
+    const attemptsUsed = await prisma.quizAttempt.count({ where: { studentId, quizId } });
+    if (attemptsUsed >= quiz.maxAttempts) throw new ApiError(409, "ALREADY_ATTEMPTED", `All ${quiz.maxAttempts} attempt(s) used.`);
     if (quiz.dueDate && quiz.dueDate < new Date()) throw new ApiError(410, "QUIZ_EXPIRED", "Quiz due date has passed.");
     const questions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" }, select: { id: true, order: true, text: true, options: true } });
     const startedAt = new Date().toISOString();
@@ -3421,19 +3424,20 @@ export const portalService = {
     const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, targets: { some: { batchId: enrollment.batchId } } } });
     if (!quiz) throw new ApiError(404, "NOT_FOUND", "Quiz not found.");
     await ensureStudentSubject(studentId, universityId, quiz.subjectId, quiz.semesterId);
-    const existing = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
-    if (existing) throw new ApiError(409, "ALREADY_SUBMITTED", "Quiz already submitted.");
+    const attemptsUsed = await prisma.quizAttempt.count({ where: { studentId, quizId } });
+    if (attemptsUsed >= quiz.maxAttempts) throw new ApiError(409, "ALREADY_SUBMITTED", `All ${quiz.maxAttempts} attempt(s) used.`);
     const questions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" } });
     if (questions.some((q) => !answers[q.id])) throw new ApiError(400, "MISSING_ANSWERS", "Some quiz questions are unanswered.");
     const results = questions.map((q) => ({ questionId: q.id, questionText: q.text, selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation }));
     const correctCount = results.filter((r) => r.isCorrect).length;
     const score = questions.length === 0 ? 0 : Number(((correctCount / questions.length) * 100).toFixed(1));
-    const attempt = await prisma.quizAttempt.create({ data: { studentId, quizId, score, answers } });
+    // Each submission is a new attempt row — earlier attempts are never overwritten.
+    const attempt = await prisma.quizAttempt.create({ data: { studentId, quizId, score, answers, attemptNumber: attemptsUsed + 1 } });
     return { attemptId: attempt.id, score, correctCount, incorrectCount: questions.length - correctCount, totalQuestions: questions.length, submittedAt: attempt.submittedAt, results };
   },
 
   async studentQuizResult(studentId: string, quizId: string) {
-    const attempt = await prisma.quizAttempt.findUnique({ where: { studentId_quizId: { studentId, quizId } } });
+    const attempt = await prisma.quizAttempt.findFirst({ where: { studentId, quizId }, orderBy: { attemptNumber: "desc" } });
     if (!attempt) throw new ApiError(404, "NOT_FOUND", "Quiz attempt not found.");
     const questions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" } });
     const answers = attempt.answers as Record<string, string>;
@@ -4212,9 +4216,10 @@ export const portalService = {
     await ensureFacultyAssignedBatch(facultyId, universityId, batchId);
     await ensureFacultyAssignedSubject(facultyId, universityId, subjectId);
     const lectureDate = new Date(date);
-    const rows = await prisma.attendanceRecord.findMany({ where: { subjectId, enrollment: { batchId }, lectureDate } });
+    const rows = await prisma.attendanceRecord.findMany({ where: { subjectId, enrollment: { batchId }, lectureDate, deletedAt: null } });
     if (rows.some((r) => r.isLocked)) throw new ApiError(403, "ATTENDANCE_RECORD_LOCKED", "Attendance record is locked.");
-    const { count } = await prisma.attendanceRecord.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+    // Soft delete — a mistaken lecture entry is retracted, not erased.
+    const { count } = await prisma.attendanceRecord.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { deletedAt: new Date() } });
     return { deletedCount: count, lectureDate: date };
   },
 
@@ -5308,8 +5313,10 @@ export const portalService = {
     return { id: updated.id, marksObtained: updated.marksObtained, grade: updated.grade, updatedAt: updated.updatedAt };
   },
 
+  // Soft delete — a retracted mark stays on record (grade history is the one thing a student
+  // may need to contest years later); every live read filters deletedAt: null.
   async deleteResult(resultId: string) {
-    await prisma.result.delete({ where: { id: resultId } });
+    await prisma.result.update({ where: { id: resultId }, data: { deletedAt: new Date() } });
   },
 
   async studentStudyPlanner(studentId: string, _universityId: string) {
