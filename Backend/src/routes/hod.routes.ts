@@ -38,6 +38,11 @@ hodRouter.post("/faculty/pool", asyncHandler(async (req, res) => res.json(await 
 hodRouter.get("/faculty/pool", asyncHandler(async (req, res) => res.json(await portalService.hodFacultyPool(scopeFrom(req)))));
 hodRouter.get("/batches/history", asyncHandler(async (req, res) => res.json(await portalService.hodBatchHistory(scopeFrom(req)))));
 hodRouter.get("/history/semesters", asyncHandler(async (req, res) => res.json(await portalService.hodHistorySemesters(scopeFrom(req)))));
+// Archive — scoped to batches THIS HOD has ever owned (released ownership included).
+hodRouter.get("/archive", asyncHandler(async (req, res) => res.json(await portalService.archiveTree(req.user!.universityId, { facultyId: req.user!.id }))));
+hodRouter.get("/archive/:semesterId/:batchId", asyncHandler(async (req, res) => res.json(
+  await portalService.archiveBatchSnapshot(req.user!.universityId, str(req.params.semesterId), str(req.params.batchId), { facultyId: req.user!.id }),
+)));
 hodRouter.post("/reset-semester", asyncHandler(async (req, res) => res.json(await portalService.hodResetSemester(scopeFrom(req)))));
 hodRouter.post("/graduate", asyncHandler(async (req, res) => res.json(await portalService.graduateFinalYear(scopeFrom(req), req.body ?? {}))));
 

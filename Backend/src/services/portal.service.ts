@@ -959,6 +959,104 @@ export const portalService = {
     return { data: rows };
   },
 
+  // ── ARCHIVE ────────────────────────────────────────────────
+  // Permanent academic record, grouped academic-year → semester → batch. A HOD sees ONLY batches
+  // they have ever owned (released ownership included); the Dean sees the whole university.
+  // Nothing here depends on a record being "current", so a 2015 transcript resolves the same way
+  // a live one does.
+  async archiveTree(universityId: string, opts: { facultyId?: string } = {}) {
+    const batchIds = opts.facultyId ? await hodAllBatchIds(opts.facultyId) : null;
+    if (batchIds && batchIds.length === 0) return { scope: "HOD", years: [] };
+
+    const enrollments = await prisma.studentEnrollment.findMany({
+      where: { ...(batchIds ? { batchId: { in: batchIds } } : { batch: { universityId } }) },
+      select: {
+        id: true, batchId: true,
+        batch: { select: { id: true, code: true, yearLevel: true } },
+        semester: { select: { id: true, label: true, number: true, status: true, academicYear: { select: { id: true, label: true } } } },
+      },
+    });
+
+    // year → semester → batch, counting students at each leaf.
+    type Leaf = { batchId: string; batchCode: string; yearLevel: string; students: number };
+    const years = new Map<string, { id: string; label: string; semesters: Map<string, { id: string; label: string; number: number; status: string; batches: Map<string, Leaf> }> }>();
+    for (const e of enrollments) {
+      const ay = e.semester.academicYear;
+      const y = years.get(ay.id) ?? { id: ay.id, label: ay.label, semesters: new Map() };
+      const s = y.semesters.get(e.semester.id) ?? { id: e.semester.id, label: e.semester.label, number: e.semester.number, status: e.semester.status, batches: new Map() };
+      const b = s.batches.get(e.batchId) ?? { batchId: e.batchId, batchCode: e.batch.code, yearLevel: e.batch.yearLevel, students: 0 };
+      b.students += 1;
+      s.batches.set(e.batchId, b);
+      y.semesters.set(e.semester.id, s);
+      years.set(ay.id, y);
+    }
+
+    return {
+      scope: opts.facultyId ? "HOD" : "UNIVERSITY",
+      years: [...years.values()]
+        .sort((a, b) => b.label.localeCompare(a.label))
+        .map((y) => ({
+          academicYearId: y.id,
+          academicYear: y.label,
+          totalStudents: [...y.semesters.values()].reduce((n, s) => n + [...s.batches.values()].reduce((m, b) => m + b.students, 0), 0),
+          semesters: [...y.semesters.values()]
+            .sort((a, b) => a.number - b.number)
+            .map((s) => ({
+              semesterId: s.id, label: s.label, number: s.number, isActive: s.status === "ACTIVE",
+              batches: [...s.batches.values()].sort((a, b) => a.batchCode.localeCompare(b.batchCode)),
+              totalStudents: [...s.batches.values()].reduce((m, b) => m + b.students, 0),
+            })),
+        })),
+    };
+  },
+
+  // Frozen snapshot of one (semester, batch): every student with their marks and attendance as
+  // recorded at the time. This is the view a registrar opens years later.
+  async archiveBatchSnapshot(universityId: string, semesterId: string, batchId: string, opts: { facultyId?: string } = {}) {
+    if (opts.facultyId) {
+      const owned = await hodAllBatchIds(opts.facultyId);
+      if (!owned.includes(batchId)) throw new ApiError(403, "FORBIDDEN", "This batch is outside your ownership history.");
+    }
+    const batch = await prisma.batch.findFirst({ where: { id: batchId, universityId }, select: { id: true, code: true, yearLevel: true } });
+    if (!batch) throw new ApiError(404, "NOT_FOUND", "Batch not found.");
+    const semester = await prisma.semester.findFirst({ where: { id: semesterId, universityId }, select: { id: true, label: true, number: true, academicYear: { select: { label: true } } } });
+    if (!semester) throw new ApiError(404, "NOT_FOUND", "Semester not found.");
+
+    const enrollments = await prisma.studentEnrollment.findMany({
+      where: { batchId, semesterId },
+      include: {
+        student: { select: { id: true, enrollmentNo: true, name: true, email: true, branch: true, admissionYear: true, graduationStatus: true, graduatedAt: true } },
+        results: { include: { phase: { select: { label: true, number: true } }, subject: { select: { code: true } } } },
+      },
+      orderBy: { rollNo: "asc" },
+    });
+
+    const rows = await Promise.all(enrollments.map(async (e) => {
+      const [total, present] = await Promise.all([
+        prisma.attendanceRecord.count({ where: { enrollmentId: e.id } }),
+        prisma.attendanceRecord.count({ where: { enrollmentId: e.id, isPresent: true } }),
+      ]);
+      return {
+        enrollmentNo: e.student.enrollmentNo, name: e.student.name, email: e.student.email,
+        branch: e.student.branch, admissionYear: e.student.admissionYear,
+        graduationStatus: e.student.graduationStatus, graduatedAt: e.student.graduatedAt,
+        rollNo: e.rollNo,
+        attendancePct: total ? Math.round((present / total) * 1000) / 10 : null,
+        lecturesHeld: total, lecturesAttended: present,
+        results: e.results
+          .sort((a, b) => a.phase.number - b.phase.number || a.subject.code.localeCompare(b.subject.code))
+          .map((r) => ({ phase: r.phase.label, subject: r.subject.code, marksObtained: r.marksObtained, maxMarks: r.maxMarks, grade: r.grade })),
+      };
+    }));
+
+    return {
+      batch: { id: batch.id, code: batch.code, yearLevel: batch.yearLevel },
+      semester: { id: semester.id, label: semester.label, number: semester.number, academicYear: semester.academicYear.label },
+      studentCount: rows.length,
+      students: rows,
+    };
+  },
+
   // The semesters THIS HOD has data for — every semester that has enrollments in a batch the HOD
   // has ever owned. Powers the sidebar "Semester History" selector. The active one is `isCurrent`.
   async hodHistorySemesters(scope: Scope) {
@@ -991,44 +1089,42 @@ export const portalService = {
     };
   },
 
-  // Reset — wipe THIS HOD's batches + students + timetable + assignments for their owned batches,
-  // atomically, so the semester onboarding wizard reappears. Students exclusive to this HOD are
-  // hard-deleted (no orphans); students shared with other batches keep their other enrollments.
+  // Reset — hand the HOD a clean slate for re-onboarding WITHOUT destroying a single academic
+  // record. A transcript requested 10 years from now must still resolve, so this only clears
+  // *operational* wiring (timetable, faculty-subject assignments, batch audience targets) and
+  // RELEASES batch ownership. Students, enrollments, results, attendance and the batches
+  // themselves are retained permanently and stay reachable through the archive views.
+  //
+  // ponytail: previously this hard-deleted results/attendance/enrollments/students/batches.
+  // Releasing scope is enough to make `needsOnboarding` true again (myScope derives batches from
+  // unreleased scope), so the wizard still reappears — with zero data loss.
   async hodResetSemester(scope: Scope) {
     const batchIds = scope.hodBatchIds;
-    if (!batchIds.length) return { batchesRemoved: 0, studentsRemoved: 0, message: "Nothing to reset — no batches owned." };
+    if (!batchIds.length) return { batchesReleased: 0, studentsPreserved: 0, message: "Nothing to reset — no batches owned." };
     const enrollments = await prisma.studentEnrollment.findMany({ where: { batchId: { in: batchIds } }, select: { id: true, studentId: true } });
     const enrollmentIds = enrollments.map((e) => e.id);
     const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
-    // students whose ONLY enrollments are in these batches → safe to remove entirely
-    const orphanIds: string[] = [];
-    for (const sid of studentIds) {
-      const other = await prisma.studentEnrollment.count({ where: { studentId: sid, batchId: { notIn: batchIds } } });
-      if (other === 0) orphanIds.push(sid);
-    }
+    const [resultsKept, attendanceKept] = await Promise.all([
+      prisma.result.count({ where: { enrollmentId: { in: enrollmentIds } } }),
+      prisma.attendanceRecord.count({ where: { enrollmentId: { in: enrollmentIds } } }),
+    ]);
     await prisma.$transaction([
-      prisma.attendanceRecord.deleteMany({ where: { enrollmentId: { in: enrollmentIds } } }),
-      prisma.result.deleteMany({ where: { enrollmentId: { in: enrollmentIds } } }),
-      prisma.mentorAssignment.deleteMany({ where: { studentId: { in: studentIds } } }),
-      prisma.studentEnrollment.deleteMany({ where: { id: { in: enrollmentIds } } }),
+      // Operational wiring only — safe to rebuild during onboarding.
       prisma.facultyBatchAssignment.deleteMany({ where: { batchId: { in: batchIds } } }),
       prisma.timetableSlot.deleteMany({ where: { batchId: { in: batchIds } } }),
-      // ponytail: batch-audience targets (notes/quizzes) FK to batch with no cascade — clear them
-      // before the batch delete or Postgres raises a foreign-key violation.
       prisma.noteBatchTarget.deleteMany({ where: { batchId: { in: batchIds } } }),
       prisma.quizBatchTarget.deleteMany({ where: { batchId: { in: batchIds } } }),
-      prisma.hodBatchScope.deleteMany({ where: { batchId: { in: batchIds } } }),
-      // clear orphan students' dependent rows, then the students themselves
-      prisma.quizAttempt.deleteMany({ where: { studentId: { in: orphanIds } } }),
-      prisma.selfNote.deleteMany({ where: { studentId: { in: orphanIds } } }),
-      prisma.announcementRead.deleteMany({ where: { studentId: { in: orphanIds } } }),
-      prisma.notification.deleteMany({ where: { studentId: { in: orphanIds } } }),
-      prisma.aIConversation.deleteMany({ where: { studentId: { in: orphanIds } } }),
-      prisma.refreshToken.deleteMany({ where: { studentId: { in: orphanIds } } }),
-      prisma.student.deleteMany({ where: { id: { in: orphanIds } } }),
-      prisma.batch.deleteMany({ where: { id: { in: batchIds } } }),
+      // Release ownership; the row survives as the permanent HOD↔batch archive link.
+      prisma.hodBatchScope.updateMany({ where: { batchId: { in: batchIds } }, data: { releasedAt: new Date() } }),
     ]);
-    return { batchesRemoved: batchIds.length, studentsRemoved: orphanIds.length };
+    return {
+      batchesReleased: batchIds.length,
+      studentsPreserved: studentIds.length,
+      enrollmentsPreserved: enrollmentIds.length,
+      resultsPreserved: resultsKept,
+      attendancePreserved: attendanceKept,
+      message: "Batches released for re-onboarding. All student records, results and attendance were preserved and remain available in the archive.",
+    };
   },
 
   // Graduation: mark the HOD's current final-semester students PASS_OUT. Never deletes/archives —
@@ -5813,7 +5909,7 @@ export const portalService = {
       select: { id: true, name: true, year: true, employeeId: true },
     });
     const rows = await Promise.all(hods.map(async (hod) => {
-      const scopes = await prisma.hodBatchScope.findMany({ where: { facultyId: hod.id }, select: { batchId: true } });
+      const scopes = await prisma.hodBatchScope.findMany({ where: { facultyId: hod.id, releasedAt: null }, select: { batchId: true } });
       const batchIds = scopes.map((s) => s.batchId);
       // the HOD's active semester = the ACTIVE semester at their year level
       const activeSem = hod.year
@@ -5897,10 +5993,11 @@ export const portalService = {
     if (!hod) throw new ApiError(404, "HOD_NOT_FOUND", "Faculty is not a HOD.");
     const batch = await batchById(batchId);
     if (batch.universityId !== universityId) throw new ApiError(400, "INVALID_BATCH", "Batch does not belong to this university.");
-    // batchId is @unique on HodBatchScope — one owner per batch
+    // batchId is @unique on HodBatchScope — one owner per batch.
+    // Re-assigning revives a previously released row (releasedAt back to null).
     await prisma.hodBatchScope.upsert({
       where: { batchId },
-      update: { facultyId, semesterId: activeSem.id, academicYearId: batch.academicYearId },
+      update: { facultyId, semesterId: activeSem.id, academicYearId: batch.academicYearId, releasedAt: null },
       create: { facultyId, batchId, semesterId: activeSem.id, academicYearId: batch.academicYearId },
     });
     return { batchId, facultyId, batchCode: batch.code };
@@ -5910,7 +6007,8 @@ export const portalService = {
     // Ownership: never let a Dean drop a scope for a batch in another university.
     const batch = await batchById(batchId);
     if (batch.universityId !== universityId) throw new ApiError(400, "INVALID_BATCH", "Batch does not belong to this university.");
-    await prisma.hodBatchScope.deleteMany({ where: { batchId } });
+    // Release rather than delete — the HOD↔batch link stays queryable in the archive forever.
+    await prisma.hodBatchScope.updateMany({ where: { batchId, releasedAt: null }, data: { releasedAt: new Date() } });
     return { removed: true };
   },
 
@@ -5960,7 +6058,7 @@ export const portalService = {
     const f = await prisma.faculty.findFirst({ where: { id: facultyId, universityId } });
     if (!f) throw new ApiError(404, "NOT_FOUND", "Faculty not found.");
     if (f.isDean) throw new ApiError(403, "CANNOT_DELETE_DEAN", "Cannot delete the Dean.");
-    const scopes = await prisma.hodBatchScope.count({ where: { facultyId } });
+    const scopes = await prisma.hodBatchScope.count({ where: { facultyId, releasedAt: null } });
     if (scopes > 0) throw new ApiError(409, "HAS_SCOPES", "Remove this HOD's batch assignments first.");
     await prisma.faculty.update({ where: { id: facultyId }, data: { deletedAt: new Date() } });
     return { deleted: true };
@@ -6286,7 +6384,7 @@ export const portalService = {
     const myBatchIds = [...new Set(myAsg.map((a) => a.batchId))];
     // 2. Whoever HODs those batches → those are this faculty's HODs.
     const hodScopes = myBatchIds.length
-      ? await prisma.hodBatchScope.findMany({ where: { batchId: { in: myBatchIds } }, select: { facultyId: true } })
+      ? await prisma.hodBatchScope.findMany({ where: { batchId: { in: myBatchIds }, releasedAt: null }, select: { facultyId: true } })
       : [];
     const hodIds = [...new Set(hodScopes.map((s) => s.facultyId))];
     // 3. Every batch under those HODs (in the active academic year).

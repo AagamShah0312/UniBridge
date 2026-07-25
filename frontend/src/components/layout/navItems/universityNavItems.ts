@@ -1,4 +1,5 @@
 import {
+  Archive,
   BookOpen,
   Building2,
   CalendarRange,
@@ -23,6 +24,7 @@ export const universityNavItems: NavSection[] = [
       { id: 'faculty', label: 'Faculty', path: '/university/faculty', icon: Users },
       { id: 'students', label: 'Students', path: '/university/students', icon: GraduationCap },
       { id: 'subjects', label: 'Subjects', path: '/university/subjects', icon: BookOpen },
+      { id: 'archive', label: 'Archive', path: '/university/archive', icon: Archive },
       { id: 'settings', label: 'Settings', path: '/university/settings', icon: Building2 },
     ],
   },

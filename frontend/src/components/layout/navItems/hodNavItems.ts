@@ -1,5 +1,6 @@
 import {
   Activity,
+  Archive,
   BookOpen,
   Calendar,
   CalendarCheck,
@@ -38,6 +39,7 @@ export const hodNavItems: NavSection[] = [
       { id: 'analytics', label: 'Analytics', path: '/hod/analytics', icon: Activity },
       { id: 'promotion', label: 'Promotion', path: '/hod/promotion', icon: RefreshCw },
       { id: 'calendar', label: 'Calendar', path: '/hod/calendar', icon: Calendar },
+      { id: 'archive', label: 'Archive', path: '/hod/archive', icon: Archive },
       { id: 'settings', label: 'Settings', path: '/hod/settings', icon: Settings },
     ],
   },

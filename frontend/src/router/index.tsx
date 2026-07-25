@@ -19,6 +19,7 @@ const HodAnalytics = lazy(() => import('@/pages/hod/AnalyticsPage'))
 const HodPromotion = lazy(() => import('@/pages/hod/PromotionPage'))
 const HodCalendar = lazy(() => import('@/pages/hod/CalendarPage'))
 const HodSettings = lazy(() => import('@/pages/hod/SettingsPage'))
+const HodArchive = lazy(() => import('@/pages/hod/ArchivePage'))
 const HodTimetable = lazy(() => import('@/pages/hod/TimetablePage'))
 const HodAnnouncements = lazy(() => import('@/pages/hod/AnnouncementsPage'))
 const HodExamPanel = lazy(() => import('@/pages/hod/ExamPanelPage'))
@@ -49,6 +50,7 @@ const UniFaculty = lazy(() => import('@/pages/university/FacultyPage'))
 const UniStudents = lazy(() => import('@/pages/university/StudentsPage'))
 const UniSubjects = lazy(() => import('@/pages/university/SubjectsPage'))
 const UniSettings = lazy(() => import('@/pages/university/SettingsPage'))
+const UniArchive = lazy(() => import('@/pages/university/ArchivePage'))
 
 // Student portal pages
 const StuDashboard = lazy(() => import('@/pages/student/DashboardPage'))
@@ -95,6 +97,7 @@ export const router = createBrowserRouter([
           { path: '/hod/analytics', element: <HodAnalytics /> },
           { path: '/hod/promotion', element: <HodPromotion /> },
           { path: '/hod/calendar', element: <HodCalendar /> },
+          { path: '/hod/archive', element: <HodArchive /> },
           { path: '/hod/settings/:section?', element: <HodSettings /> },
 
           // ── Faculty ─────────────────────────
@@ -121,6 +124,7 @@ export const router = createBrowserRouter([
           { path: '/university/faculty', element: <UniFaculty /> },
           { path: '/university/students', element: <UniStudents /> },
           { path: '/university/subjects', element: <UniSubjects /> },
+          { path: '/university/archive', element: <UniArchive /> },
           { path: '/university/settings', element: <UniSettings /> },
 
           // ── Student ─────────────────────────

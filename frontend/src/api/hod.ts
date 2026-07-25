@@ -3,6 +3,7 @@ import { api } from './client'
 import type { PaginatedResponse } from '@/types/common'
 import type * as T from '@/types/hod'
 import type { HodTimetableSlot } from '@/types/hod'
+import type { ArchiveSnapshot, ArchiveTree } from '@/types/archive'
 
 type Params = Record<string, string | number | boolean | undefined>
 
@@ -40,6 +41,11 @@ export const hodApi = {
 
   graduateFinalYear: (detainEnrollmentNos?: string[]) =>
     api.post<{ graduated: number; detained: number; semester: string }>('/hod/graduate', { detainEnrollmentNos }).then((r) => r.data),
+
+  // Permanent archive — only batches this HOD has ever owned.
+  archive: () => api.get<ArchiveTree>('/hod/archive').then((r) => r.data),
+  archiveSnapshot: (semesterId: string, batchId: string) =>
+    api.get<ArchiveSnapshot>(`/hod/archive/${semesterId}/${batchId}`).then((r) => r.data),
 
   historySemesters: () =>
     api.get<{ currentSemesterId: string | null; data: { semesterId: string; number: number; label: string; yearLevel: string; academicYear: string; studentCount: number; isCurrent: boolean }[] }>('/hod/history/semesters').then((r) => r.data),

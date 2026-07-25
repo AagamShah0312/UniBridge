@@ -336,6 +336,9 @@ model HodBatchScope {
   semesterId     String   @db.Uuid
   academicYearId String   @db.Uuid
   createdAt      DateTime @default(now())
+  // Ownership is RELEASED, never deleted: this row is the durable HOD↔batch link that powers
+  // the year-wise/semester-wise archive years later. Active scope = releasedAt IS NULL.
+  releasedAt     DateTime?
 
   faculty      Faculty      @relation(fields: [facultyId], references: [id])
   batch        Batch        @relation(fields: [batchId], references: [id])

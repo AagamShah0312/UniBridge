@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { ArchiveSnapshot, ArchiveTree } from '@/types/archive'
 
 // University (Dean) portal — backend mount is /admin.
 
@@ -109,4 +110,9 @@ export const universityApi = {
 
   settings: () => api.get<{ name: string; slug: string; logoUrl: string | null; website: string | null; contactEmail: string | null; address: string | null; plan: string }>('/admin/settings').then((r) => r.data),
   updateSettings: (body: Record<string, unknown>) => api.put('/admin/settings', body).then((r) => r.data),
+
+  // Permanent archive — the whole university, every year/semester/batch ever recorded.
+  archive: () => api.get<ArchiveTree>('/admin/archive').then((r) => r.data),
+  archiveSnapshot: (semesterId: string, batchId: string) =>
+    api.get<ArchiveSnapshot>(`/admin/archive/${semesterId}/${batchId}`).then((r) => r.data),
 }

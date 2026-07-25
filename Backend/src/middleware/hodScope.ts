@@ -13,8 +13,10 @@ export async function hodScope(req: Request, _res: Response, next: NextFunction)
   // semester of that year is ACTIVE at a time. Resolve the HOD's CURRENT context by academic year,
   // not by a scope.semesterId that drifts after promotion. This keeps batches/students visible
   // even when a promotion has advanced the active semester past where the scope row points.
+  // Only CURRENT ownership drives the live portal. Released rows are retained forever for the
+  // archive (see hodBatchHistory) but must not resurface as active batches.
   const allScopes = await prisma.hodBatchScope.findMany({
-    where: { facultyId: req.user.id },
+    where: { facultyId: req.user.id, releasedAt: null },
     include: { batch: { select: { id: true, code: true, academicYearId: true } } },
   });
 
