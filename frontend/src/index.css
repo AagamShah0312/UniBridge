@@ -69,6 +69,16 @@
   }
 }
 
+/* Mobile navigation drawer slide-over. */
+@keyframes slideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;

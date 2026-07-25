@@ -34,3 +34,6 @@ graphify-out/
 
 # HOD UI
 HOD_UI/
+# React Native / Expo
+mobile/node_modules/
+mobile/.expo/

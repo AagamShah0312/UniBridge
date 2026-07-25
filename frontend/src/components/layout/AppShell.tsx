@@ -8,6 +8,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { hodApi } from '@/api/hod'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { MobileTabBar } from './MobileTabBar'
 import { hodNavItems } from './navItems/hodNavItems'
 import { facultyNavItems } from './navItems/facultyNavItems'
 import { studentNavItems } from './navItems/studentNavItems'
@@ -64,14 +65,14 @@ export default function AppShell() {
         <Sidebar sections={sections} role={role} />
       </div>
 
-      {/* Mobile drawer */}
+      {/* Mobile drawer — slide-over from the left, matching the mobile design's "More" menu. */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="absolute inset-0 bg-black/40"
+            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
             onClick={() => setMobileSidebar(false)}
           />
-          <div className="absolute left-0 top-0 h-full">
+          <div className="absolute left-0 top-0 h-full animate-[slideIn_.18s_ease-out]">
             <Sidebar
               sections={sections}
               role={role}
@@ -83,12 +84,15 @@ export default function AppShell() {
 
       <div className={cn('flex min-w-0 flex-1 flex-col')}>
         <Topbar />
-        <main className="scrollbar-thin flex-1 overflow-y-auto p-4 md:p-6">
+        {/* pb-24 on mobile keeps content clear of the fixed bottom tab bar. */}
+        <main className="scrollbar-thin flex-1 overflow-y-auto p-4 pb-24 md:p-6 lg:pb-6">
           <Suspense fallback={<div className="flex h-full items-center justify-center py-20 text-text-muted"><Loader2 className="animate-spin" size={22} /></div>}>
             <Outlet />
           </Suspense>
         </main>
       </div>
+
+      <MobileTabBar sections={sections} role={role} onOpenMenu={() => setMobileSidebar(true)} />
     </div>
   )
 }

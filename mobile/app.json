@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "UniPortal",
+    "slug": "uniportal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "in.edu.ljku.uniportal"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "in.edu.ljku.uniportal"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "uniportal"
+  }
+}
