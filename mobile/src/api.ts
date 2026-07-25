@@ -156,8 +156,24 @@ export interface AnalyticsKpi {
   [key: string]: unknown
 }
 
+export interface AttendanceTrend {
+  labels: string[]
+  series: { label: string; data: (number | null)[] }[]
+}
+
+export interface AtRiskRow {
+  enrollmentNo: string
+  name: string
+  batchCode: string | null
+  attendancePct: number | null
+  avgMarksPct: number | null
+  riskFactor?: string
+}
+
 export const hodApi = {
   scope: (t: string) => apiGet<Scope>(t, '/hod/my-scope'),
+  attendanceTrend: (t: string) => apiGet<AttendanceTrend>(t, '/hod/dashboard/attendance-trend'),
+  atRisk: (t: string) => apiGet<{ data: AtRiskRow[]; total?: number }>(t, '/hod/dashboard/at-risk'),
   summary: (t: string) => apiGet<DashboardSummary>(t, '/hod/dashboard/summary'),
   resultsOverview: (t: string) => apiGet<ResultsOverview>(t, '/hod/dashboard/results-overview'),
   students: (t: string, page = 1) => apiGet<Paged<StudentRow>>(t, `/hod/students?page=${page}&limit=30`),
