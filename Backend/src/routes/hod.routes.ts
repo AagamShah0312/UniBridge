@@ -183,8 +183,8 @@ hodRouter.get("/promotion/preview-summary", asyncHandler(async (req, res) => res
 hodRouter.post("/promotion/execute", asyncHandler(async (req, res) => res.json(await portalService.executePromotion(String(req.body.draftId), req.body.mappings))));
 hodRouter.get("/promotion/history", asyncHandler(async (req, res) => res.json(await portalService.promotionHistory(Number(req.query.page ?? 1), Number(req.query.limit ?? 10)))));
 
-hodRouter.get("/calendar/events", asyncHandler(async (req, res) => res.json(await portalService.calendarEvents(req.user!.universityId, req.query as Record<string, string | number | undefined>))));
-hodRouter.get("/calendar/events/upcoming", asyncHandler(async (req, res) => res.json(await portalService.upcomingEvents(req.user!.universityId, Number(req.query.limit ?? 6)))));
+hodRouter.get("/calendar/events", asyncHandler(async (req, res) => res.json(await portalService.calendarEvents(req.user!.universityId, req.query as Record<string, string | number | undefined>, "HOD"))));
+hodRouter.get("/calendar/events/upcoming", asyncHandler(async (req, res) => res.json(await portalService.upcomingEvents(req.user!.universityId, Number(req.query.limit ?? 6), "HOD"))));
 hodRouter.get("/calendar/events/:eventId", asyncHandler(async (req, res) => res.json(await portalService.getEvent(str(req.params.eventId)))));
 hodRouter.post("/calendar/events", asyncHandler(async (req, res) => res.status(201).json(await portalService.createEvent(req.user!.universityId, req.user!.id, req.body))));
 hodRouter.put("/calendar/events/:eventId", asyncHandler(async (req, res) => res.json(await portalService.updateEvent(str(req.params.eventId), req.body))));

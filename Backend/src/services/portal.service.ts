@@ -18,6 +18,19 @@ type Scope = {
   userId: string;
 };
 
+// ── Calendar visibility tiers ────────────────────────────────
+// One shared event store, read through a role-scoped filter so all three portals stay in sync:
+//   ALL         → HOD + Faculty + Students (holidays, breaks, exams — the student-facing calendar)
+//   FACULTY_HOD → HOD + Faculty only (internal planning)
+//   HOD_ONLY    → HOD only
+// `audience` is a required arg on calendarEvents() so no caller can silently over-share.
+export type CalendarAudience = "STUDENT" | "FACULTY" | "HOD";
+const VISIBLE_TO: Record<CalendarAudience, ("ALL" | "FACULTY_HOD" | "HOD_ONLY")[]> = {
+  STUDENT: ["ALL"],
+  FACULTY: ["ALL", "FACULTY_HOD"],
+  HOD: ["ALL", "FACULTY_HOD", "HOD_ONLY"],
+};
+
 function planTaskTone(priority: string) {
   if (priority === "high") return "HIGH";
   if (priority === "low") return "LOW";
@@ -2639,8 +2652,8 @@ export const portalService = {
 
   // ── Calendar Events ───────────────────────────────────────
 
-  async calendarEvents(universityId: string, query: Record<string, string | number | undefined>) {
-    const where: any = { universityId };
+  async calendarEvents(universityId: string, query: Record<string, string | number | undefined>, audience: CalendarAudience) {
+    const where: any = { universityId, deletedAt: null, visibleTo: { in: VISIBLE_TO[audience] } };
     if (query.year && query.month) {
       const y = Number(query.year); const m = Number(query.month);
       const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0);
@@ -2651,16 +2664,16 @@ export const portalService = {
       where.endDate = { lte: new Date(String(query.endDate)) };
     }
     const rows = await prisma.calendarEvent.findMany({ where, orderBy: { startDate: "asc" } });
-    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, description: e.description })) };
+    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, visibleTo: e.visibleTo, description: e.description })) };
   },
 
-  async upcomingEvents(universityId: string, limit = 6) {
+  async upcomingEvents(universityId: string, limit = 6, audience: CalendarAudience = "STUDENT") {
     const rows = await prisma.calendarEvent.findMany({
-      where: { universityId, startDate: { gte: new Date() }, deletedAt: null },
+      where: { universityId, startDate: { gte: new Date() }, deletedAt: null, visibleTo: { in: VISIBLE_TO[audience] } },
       orderBy: { startDate: "asc" },
       take: limit,
     });
-    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, description: e.description })) };
+    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, visibleTo: e.visibleTo, description: e.description })) };
   },
 
   async getEvent(eventId: string) {
@@ -2697,8 +2710,8 @@ export const portalService = {
   },
 
   // Real calendar listing (this used to return an empty stub PDF).
-  async calendarExport(universityId: string, query: Record<string, string | number | undefined> = {}): Promise<ExportTable> {
-    const { data } = await this.calendarEvents(universityId, query);
+  async calendarExport(universityId: string, query: Record<string, string | number | undefined> = {}, audience: CalendarAudience = "HOD"): Promise<ExportTable> {
+    const { data } = await this.calendarEvents(universityId, query, audience);
     const fmt = (d: Date | string) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     return {
       title: "Academic Calendar",
@@ -4767,11 +4780,11 @@ export const portalService = {
   // ── Faculty — Calendar / Analytics ───────────────────────
 
   async facultyCalendarEvents(universityId: string, year: number, month: number) {
-    return this.calendarEvents(universityId, { year, month });
+    return this.calendarEvents(universityId, { year, month }, "FACULTY");
   },
 
   async facultyUpcomingEvents(universityId: string, limit = 6) {
-    return this.upcomingEvents(universityId, limit);
+    return this.upcomingEvents(universityId, limit, "FACULTY");
   },
 
   async facultyAnalyticsAttendance(facultyId: string, universityId: string, semesterId?: string, subjectId?: string, batchId?: string) {
