@@ -1,16 +1,16 @@
-# Graph Report - UniBridge_  (2026-07-23)
+# Graph Report - UniBridge_  (2026-07-26)
 
 ## Corpus Check
-- 214 files · ~250,901 words
+- 351 files · ~419,729 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1401 nodes · 2453 edges · 194 communities (114 shown, 80 thin omitted)
-- Extraction: 74% EXTRACTED · 26% INFERRED · 0% AMBIGUOUS · INFERRED: 645 edges (avg confidence: 0.52)
+- 1603 nodes · 2125 edges · 189 communities (122 shown, 67 thin omitted)
+- Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 116 edges (avg confidence: 0.59)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d82332ca`
+- Built from commit: `66ded4ff`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -110,6 +110,7 @@
 - buildPagination
 - env.ts
 - AIAssistantPage.tsx
+- QuizzesPage.tsx
 - vercel.json
 - hod.ts
 - useTableSort.ts
@@ -118,19 +119,13 @@
 - studyPlanner.service.ts
 - app.ts
 - package.json
-- scripts
 - studentAiBridge.service.ts
-- package.json
-- settings.py
 - StudentAiConfig
 - seed-sy3-timetable-attendance.ts
-- prisma
 - @prisma/adapter-pg
 - @prisma/client
 - @types/pdfkit
 - zod
-- clsx
-- react-dom
 - react-router-dom
 - seed-sy3-marks.ts
 - @tanstack/react-query
@@ -138,108 +133,105 @@
 - AppShell.tsx
 - StudentsPage.tsx
 - hodAllBatchIds
-- faculty.ts
 - student.ts
 - FacultyPage.tsx
-- formatStudyPlan
-- getAttendanceRules
-- overallAttendancePctBulk
-- @supabase/supabase-js
 - auth.ts
 - InternalServicePermission
 - documents.py
-- jobs.py
-- generate_study_plan
 - SimpleCorsMiddleware
-- build_semantic_chunks
 - __init__.py
 - Student
 - Path
 - Path
 - Student
 - Subject
-- pg
 - formatStudyPlan
 - getAttendanceRules
 - NON_WORKING_TYPES
 - overallAttendancePctBulk
+- Dashboard.tsx
+- devDependencies
+- App.tsx
+- LoginScreen.tsx
+- @prisma/adapter-pg
+- @types/pdfkit
 
 ## God Nodes (most connected - your core abstractions)
-1. `StudentContextMixin` - 47 edges
-2. `StudyPlan` - 43 edges
-3. `StudentAIChatSession` - 42 edges
-4. `NoteInsight` - 41 edges
-5. `StudyPlanTask` - 41 edges
-6. `PYQInsight` - 40 edges
-7. `ChatDetailView` - 33 edges
-8. `PYQFile` - 32 edges
-9. `Note` - 31 edges
-10. `NoteInsightSerializer` - 31 edges
+1. `Store` - 24 edges
+2. `PrismaMirrorModel` - 23 edges
+3. `StudentContextMixin` - 22 edges
+4. `StudyPlan` - 21 edges
+5. `compilerOptions` - 21 edges
+6. `StudentAIChatSession` - 19 edges
+7. `NoteInsight` - 19 edges
+8. `StudyPlanTask` - 19 edges
+9. `PYQInsight` - 18 edges
+10. `compilerOptions` - 16 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `StudentAiApiTests` --uses--> `Student`  [INFERRED]
-  AI Assistant/Django AI assistant/student_ai/tests.py → AI Assistant/Django AI assistant/student_ai/models.py
 - `StudentAiApiTests` --uses--> `Semester`  [INFERRED]
   AI Assistant/Django AI assistant/student_ai/tests.py → AI Assistant/Django AI assistant/student_ai/models.py
-- `EmbeddingService` --uses--> `Subject`  [INFERRED]
-  AI Assistant/Django AI assistant/student_ai/services/embedding_service.py → AI Assistant/Django AI assistant/student_ai/models.py
-- `StudentAiApiTests` --uses--> `Subject`  [INFERRED]
+- `StudentAiApiTests` --uses--> `Note`  [INFERRED]
   AI Assistant/Django AI assistant/student_ai/tests.py → AI Assistant/Django AI assistant/student_ai/models.py
-- `StudentAiApiTests` --uses--> `StudentEnrollment`  [INFERRED]
-  AI Assistant/Django AI assistant/student_ai/tests.py → AI Assistant/Django AI assistant/student_ai/models.py
+- `GeminiDocumentService` --uses--> `SharedAIService`  [INFERRED]
+  AI Assistant/Django AI assistant/student_ai/services/gemini_service.py → AI Assistant/Django AI assistant/student_ai/services/ai_service.py
+- `process_note_document()` --calls--> `EmbeddingService`  [INFERRED]
+  AI Assistant/Django AI assistant/student_ai/services/ingestion_service.py → AI Assistant/Django AI assistant/student_ai/services/embedding_service.py
+- `_store_pyq_chunks()` --calls--> `EmbeddingService`  [INFERRED]
+  AI Assistant/Django AI assistant/student_ai/services/pyq_service.py → AI Assistant/Django AI assistant/student_ai/services/embedding_service.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (194 total, 80 thin omitted)
+## Communities (189 total, 67 thin omitted)
 
 ### Community 0 - "UniBridge Free-Tier Deployment Plan"
-Cohesion: 0.21
-Nodes (8): WIPE_TABLES, chunkedCreate(), gradeFor(), main(), rand(), adapter, pool, prisma
+Cohesion: 0.08
+Nodes (40): Note, PYQFile, Semester, build_semantic_chunks(), SemanticChunk, GeminiDocumentService, _image_url(), _mime_from_suffix() (+32 more)
 
 ### Community 1 - "Confirmed Bugs"
-Cohesion: 0.10
-Nodes (37): Store, HodService, StudentListParams, AcademicYear, AcademicYearStatus, Activity, ArchiveJob, AttendanceRecord (+29 more)
+Cohesion: 0.05
+Nodes (57): WIPE_TABLES, chunkedCreate(), gradeFor(), main(), rand(), chunked(), clamp(), GRID (+49 more)
 
 ### Community 2 - "UniBridge Frontend & Backend Changes for Faster Response"
-Cohesion: 0.07
-Nodes (24): api, queue, facultyApi, Params, hodApi, Params, SubjectComponentCfg, SubjectConfig (+16 more)
+Cohesion: 0.13
+Nodes (13): Paged, PromotionDashboard, PromotionHodRow, UniBatch, UniFacultyRow, UniHod, UniHodsResponse, UniOverview (+5 more)
 
 ### Community 3 - "Observability: verify every performance change"
-Cohesion: 0.05
-Nodes (4): DAY_LABELS, DAY_NAMES, DayStatus, Scope
+Cohesion: 0.04
+Nodes (6): CalendarAudience, DAY_LABELS, DAY_NAMES, DayStatus, Scope, VISIBLE_TO
 
 ### Community 4 - "Backend changes"
-Cohesion: 0.11
-Nodes (19): dependencies, compression, express, helmet, pdfkit, @prisma/client, tsx, @types/multer (+11 more)
+Cohesion: 0.06
+Nodes (33): dependencies, compression, cors, dotenv, express, helmet, morgan, multer (+25 more)
 
 ### Community 5 - "Frontend changes"
-Cohesion: 0.11
-Nodes (19): autoprefixer, devDependencies, autoprefixer, postcss, tailwindcss, @types/node, @types/react, @types/react-dom (+11 more)
+Cohesion: 0.07
+Nodes (26): autoprefixer, devDependencies, autoprefixer, postcss, tailwindcss, @types/node, @types/react-dom, typescript (+18 more)
 
 ### Community 6 - "Secure deployment plan"
 Cohesion: 0.07
 Nodes (27): AcademicYearWithSemesters, ActivityItem, AnalyticsKpi, AssignmentRow, AtRiskRow, AttendanceStatSummary, AttendanceTableRow, AttendanceTrend (+19 more)
 
 ### Community 7 - "devDependencies"
-Cohesion: 0.13
-Nodes (15): devDependencies, @types/compression, @types/cors, @types/express, @types/morgan, @types/node, @types/pg, typescript (+7 more)
+Cohesion: 0.05
+Nodes (42): devDependencies, @types/compression, @types/cors, @types/express, @types/morgan, @types/node, @types/pg, typescript (+34 more)
 
 ### Community 8 - "compilerOptions"
 Cohesion: 0.07
 Nodes (27): compilerOptions, allowImportingTsExtensions, baseUrl, composite, isolatedModules, jsx, lib, module (+19 more)
 
 ### Community 9 - "dependencies"
-Cohesion: 0.12
-Nodes (17): axios, date-fns, dependencies, axios, date-fns, lucide-react, react, react-hot-toast (+9 more)
+Cohesion: 0.05
+Nodes (42): axios, clsx, date-fns, expo, expo-font, expo-status-bar, dependencies, axios (+34 more)
 
 ### Community 10 - "storage.ts"
-Cohesion: 0.17
-Nodes (19): env, envSchema, amzDate(), basePath, enc(), encPath(), hmac(), presignGetUrl() (+11 more)
+Cohesion: 0.07
+Nodes (23): createApp(), env, envSchema, universityId(), requireAuth(), requireFacultyPortal(), requireSuperAdmin(), errorHandler() (+15 more)
 
 ### Community 11 - "AppShell.tsx"
-Cohesion: 0.22
-Nodes (6): facultyNavItems, hodNavItems, studentNavItems, NavItem, NavSection, universityNavItems
+Cohesion: 0.31
+Nodes (4): facultyNavItems, studentNavItems, NavItem, NavSection
 
 ### Community 12 - "compilerOptions"
 Cohesion: 0.10
@@ -310,8 +302,8 @@ Cohesion: 0.22
 Nodes (4): Assignment, EditNoteModal(), toIso(), UploadNoteModal()
 
 ### Community 34 - "auth.ts"
-Cohesion: 0.18
-Nodes (11): hodRouter, upload, cell(), csvCell(), ExportFormat, ExportTable, parseFormat(), sendExport() (+3 more)
+Cohesion: 0.29
+Nodes (10): cell(), computeWidths(), csvCell(), ExportFormat, ExportTable, isMeasure(), sendExport(), toCsv() (+2 more)
 
 ### Community 35 - "download.ts"
 Cohesion: 0.48
@@ -343,11 +335,11 @@ Nodes (3): LEVEL_TO_SEM, SEM_TONE, YEAR_TONE
 
 ### Community 49 - "index.tsx"
 Cohesion: 0.04
-Nodes (52): FacAnalytics, FacAnnouncements, FacAttendance, FacCalendar, FacDashboard, FacExams, FacMentees, FacNotes (+44 more)
+Nodes (54): FacAnalytics, FacAnnouncements, FacAttendance, FacCalendar, FacDashboard, FacExams, FacMentees, FacNotes (+46 more)
 
 ### Community 50 - "getFacultyScopeData"
-Cohesion: 0.45
-Nodes (51): AIConversation, BackgroundJob, Note, NoteInsight, PYQFile, PYQInsight, Student, StudentAIChatSession (+43 more)
+Cohesion: 0.10
+Nodes (46): AIConversation, AIDocument, AIDocumentChunk, AIDocumentMetadata, BackgroundJob, CalendarEvent, Flashcard, Meta (+38 more)
 
 ### Community 53 - "Badge.tsx"
 Cohesion: 0.40
@@ -366,68 +358,80 @@ Cohesion: 0.33
 Nodes (4): PlannerData, PlannerTask, SubjectOption, TODAY
 
 ### Community 71 - "hodAllBatchIds"
-Cohesion: 0.12
-Nodes (4): generate_note_insight(), analyze_pyq(), predict_topic_trends(), Response
+Cohesion: 0.09
+Nodes (35): available_chapters(), _chapter_label(), _content_tokens(), generate_quiz(), _matching_chunks(), _note_label(), _valid_question(), ChatDetailView (+27 more)
 
 ### Community 96 - "getAttendanceRules"
 Cohesion: 0.12
 Nodes (25): build_features(), _generate_synthetic_data(), get_model(), Any, Train and persist the best ML regressor for marks prediction., retrain_from_db(), train_model(), model_metadata() (+17 more)
 
 ### Community 97 - "buildPagination"
-Cohesion: 0.28
-Nodes (11): AIDocument, AIDocumentChunk, AIDocumentMetadata, CalendarEvent, Flashcard, Meta, Phase, PrismaMirrorModel (+3 more)
+Cohesion: 0.18
+Nodes (6): api, queue, facultyApi, Params, Notification, notificationsApi
 
 ### Community 114 - "AIAssistantPage.tsx"
 Cohesion: 0.29
 Nodes (3): renderInlineMarkdown(), StructuredAssistantContent(), SubjectOption
 
+### Community 118 - "QuizzesPage.tsx"
+Cohesion: 0.40
+Nodes (3): Question, QuizAttempt, QuizResult
+
 ### Community 129 - "hod.ts"
-Cohesion: 0.23
-Nodes (7): universityId(), requireAuth(), requireFacultyPortal(), requireSuperAdmin(), authRouter, facultyRouter, upload
+Cohesion: 0.25
+Nodes (7): ArchiveBatch, ArchiveResult, ArchiveSemester, ArchiveSnapshot, ArchiveStudent, ArchiveTree, ArchiveYear
 
 ### Community 132 - "useTableSort.ts"
 Cohesion: 0.67
 Nodes (3): getVal(), SortDir, useTableSort()
 
 ### Community 133 - "http.ts"
-Cohesion: 0.21
-Nodes (5): hodScope(), adminRouter, upload, ApiError, asyncHandler()
+Cohesion: 0.33
+Nodes (5): hodApi, Params, SubjectComponentCfg, SubjectConfig, SubjectConfigInput
 
 ### Community 134 - "http.ts"
-Cohesion: 0.15
-Nodes (11): AIServiceError, Any, SharedAIService, GeminiDocumentService, _image_url(), _mime_from_suffix(), _parse_json(), Any (+3 more)
+Cohesion: 0.09
+Nodes (21): backgroundColor, backgroundImage, foregroundImage, monochromeImage, adaptiveIcon, package, predictiveBackGestureEnabled, expo (+13 more)
 
 ### Community 135 - "studyPlanner.service.ts"
 Cohesion: 0.28
 Nodes (13): academicInputsForStudent(), AcademicSubject, activePhaseForToday(), addDays(), buildTasks(), generateStudyPlanForStudent(), jsonStrings(), nearestExamDate() (+5 more)
 
 ### Community 136 - "app.ts"
-Cohesion: 0.22
-Nodes (8): createApp(), errorHandler(), notFoundHandler(), apiRouter, studentRouter, upload, app, portalService
+Cohesion: 0.47
+Nodes (5): d(), Ev, EVENTS, main(), PHASES
 
 ### Community 137 - "package.json"
-Cohesion: 0.20
-Nodes (9): name, private, scripts, build, dev, lint, preview, type (+1 more)
-
-### Community 138 - "scripts"
-Cohesion: 0.22
-Nodes (9): scripts, build, dev, postinstall, prisma:generate, prisma:migrate, prisma:push, reset:import-faculty (+1 more)
+Cohesion: 0.38
+Nodes (11): amzDate(), basePath, enc(), encPath(), hmac(), presignGetUrl(), sha256hex(), signingKey() (+3 more)
 
 ### Community 139 - "studentAiBridge.service.ts"
 Cohesion: 0.36
 Nodes (9): chunked(), clamp(), gradeFor(), GRID, main(), rand(), SLOTS, studentBase() (+1 more)
 
-### Community 140 - "package.json"
-Cohesion: 0.40
-Nodes (4): name, private, type, version
-
-### Community 144 - "seed-sy3-timetable-attendance.ts"
-Cohesion: 0.36
-Nodes (8): chunked(), clamp(), GRID, LECTURES, main(), rand(), studentBase(), T
+### Community 146 - "@prisma/adapter-pg"
+Cohesion: 0.11
+Nodes (29): AnalyticsScreen(), AnnouncementsScreen(), ArchiveScreen(), AttendanceScreen(), DashboardScreen(), DAYS, ExamPanelScreen(), FacultyScreen() (+21 more)
 
 ### Community 148 - "@types/pdfkit"
 Cohesion: 0.67
 Nodes (3): FacultyRow, main(), parseCsv()
+
+### Community 149 - "zod"
+Cohesion: 0.15
+Nodes (17): IconBell(), IconCalendarCheck(), IconClose(), IconMenu(), NavIcon(), P, TabAttendance(), TabHome() (+9 more)
+
+### Community 152 - "react-router-dom"
+Cohesion: 0.40
+Nodes (3): MobileTabBar(), PRIMARY_TABS, SHORT_LABEL
+
+### Community 153 - "seed-sy3-marks.ts"
+Cohesion: 0.11
+Nodes (16): AnalyticsKpi, AnnouncementRow, AtRiskRow, AttendanceSummary, AttendanceTrend, AuthUser, DashboardSummary, ExamCoordinators (+8 more)
+
+### Community 154 - "@tanstack/react-query"
+Cohesion: 0.40
+Nodes (4): compilerOptions, strict, extends, expo/tsconfig.base
 
 ### Community 161 - "getFacultyScopeData"
 Cohesion: 0.40
@@ -438,16 +442,8 @@ Cohesion: 0.67
 Nodes (3): hodAllBatchIds(), hodEnrollmentWhere(), scopedCurrentEnrollments()
 
 ### Community 166 - "student.ts"
-Cohesion: 0.17
-Nodes (12): djangoAiApi, djangoAiDelete(), djangoAiErrorMessage(), djangoAiGet(), djangoAiPost(), DjangoResponse, unwrapDjangoResponse(), DjangoChat (+4 more)
-
-### Community 168 - "formatStudyPlan"
-Cohesion: 0.26
-Nodes (12): Semester, analyze_pyq_statistics(), _extract_questions(), _matching_semester(), process_pyq_document(), _store_legacy_insight(), _store_pyq_chunks(), _store_questions() (+4 more)
-
-### Community 169 - "getAttendanceRules"
-Cohesion: 0.23
-Nodes (14): normalize_list(), extract_document_text(), _extract_note_structure(), _extract_scanned_pdf_text(), _keywords(), _local_pdf_path(), process_note_document(), Path (+6 more)
+Cohesion: 0.46
+Nodes (7): djangoAiApi, djangoAiDelete(), djangoAiErrorMessage(), djangoAiGet(), djangoAiPost(), DjangoResponse, unwrapDjangoResponse()
 
 ### Community 176 - "InternalServicePermission"
 Cohesion: 0.40
@@ -457,33 +453,49 @@ Nodes (3): InternalServicePermission, IsStudentScope, BasePermission
 Cohesion: 0.73
 Nodes (5): _extract_from_path(), extract_text(), file_hash(), _is_remote(), Path
 
-### Community 178 - "jobs.py"
-Cohesion: 0.70
-Nodes (4): create_job(), _json_safe(), Any, submit_job()
+### Community 194 - "Dashboard.tsx"
+Cohesion: 0.15
+Nodes (10): hodApi, IconClipboard(), IconFaculty(), IconShield(), IconStudents(), IconTrend(), Dashboard(), MONTHS (+2 more)
 
-### Community 179 - "generate_study_plan"
-Cohesion: 0.50
-Nodes (4): generate_study_plan(), _planner_context(), Student, date
+### Community 195 - "devDependencies"
+Cohesion: 0.18
+Nodes (8): AIServiceError, Any, SharedAIService, generate_study_plan(), _planner_context(), Student, date, Exception
+
+### Community 196 - "App.tsx"
+Cohesion: 0.33
+Nodes (4): styles, LoginResponse, initials(), Shell()
+
+### Community 197 - "LoginScreen.tsx"
+Cohesion: 0.40
+Nodes (3): loginHod(), s, theme
+
+### Community 199 - "@prisma/adapter-pg"
+Cohesion: 0.39
+Nodes (6): baseUrl(), DjangoResponse, requestInternal(), requestStudent(), serviceHeaders(), studentAiBridge
+
+### Community 200 - "@types/pdfkit"
+Cohesion: 0.25
+Nodes (4): DjangoChat, DjangoPyqPrediction, Params, studentApi
 
 ## Knowledge Gaps
-- **476 isolated node(s):** `name`, `version`, `private`, `type`, `dev` (+471 more)
+- **556 isolated node(s):** `upload`, `Scope`, `CalendarAudience`, `VISIBLE_TO`, `DAY_NAMES` (+551 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **80 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **67 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Note` connect `getFacultyScopeData` to `buildPagination`, `overallAttendancePctBulk`, `getAttendanceRules`, `hodAllBatchIds`?**
-  _High betweenness centrality (0.002) - this node is a cross-community bridge._
-- **Why does `StudentAiApiTests` connect `overallAttendancePctBulk` to `formatStudyPlan`, `buildPagination`, `getFacultyScopeData`?**
-  _High betweenness centrality (0.002) - this node is a cross-community bridge._
-- **Why does `SharedAIService` connect `http.ts` to `getFacultyScopeData`, `generate_study_plan`, `hodAllBatchIds`?**
-  _High betweenness centrality (0.002) - this node is a cross-community bridge._
-- **Are the 25 inferred relationships involving `StudentContextMixin` (e.g. with `AIConversation` and `BackgroundJob`) actually correct?**
-  _`StudentContextMixin` has 25 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 36 inferred relationships involving `StudyPlan` (e.g. with `ChatCreateSerializer` and `ChatMessageSerializer`) actually correct?**
-  _`StudyPlan` has 36 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 35 inferred relationships involving `StudentAIChatSession` (e.g. with `ChatCreateSerializer` and `ChatMessageSerializer`) actually correct?**
-  _`StudentAIChatSession` has 35 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 35 inferred relationships involving `NoteInsight` (e.g. with `ChatCreateSerializer` and `ChatMessageSerializer`) actually correct?**
-  _`NoteInsight` has 35 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `dependencies` connect `dependencies` to `devDependencies`?**
+  _High betweenness centrality (0.005) - this node is a cross-community bridge._
+- **Are the 15 inferred relationships involving `StudyPlan` (e.g. with `ChatCreateSerializer` and `ChatMessageSerializer`) actually correct?**
+  _`StudyPlan` has 15 INFERRED edges - model-reasoned connections that need verification._
+- **What connects `upload`, `Scope`, `CalendarAudience` to the rest of the system?**
+  _556 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `UniBridge Free-Tier Deployment Plan` be split into smaller, more focused modules?**
+  _Cohesion score 0.08 - nodes in this community are weakly interconnected._
+- **Should `Confirmed Bugs` be split into smaller, more focused modules?**
+  _Cohesion score 0.05189189189189189 - nodes in this community are weakly interconnected._
+- **Should `UniBridge Frontend & Backend Changes for Faster Response` be split into smaller, more focused modules?**
+  _Cohesion score 0.13333333333333333 - nodes in this community are weakly interconnected._
+- **Should `Observability: verify every performance change` be split into smaller, more focused modules?**
+  _Cohesion score 0.043478260869565216 - nodes in this community are weakly interconnected._

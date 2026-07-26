@@ -80,6 +80,11 @@ async function bestEffortStudentAi(action: () => Promise<unknown>) {
   }
 }
 
+// Avoid queuing the same note repeatedly while the student modal polls for
+// completed chapters. This is intentionally short-lived; a later request can
+// retry a failed or stalled AI job.
+const quizChapterTriggers = new Map<string, number>();
+
 // ─────────────────────────────────────────────────────────────
 // Pure utility helpers (no DB calls)
 // ─────────────────────────────────────────────────────────────
@@ -3514,7 +3519,42 @@ export const portalService = {
     await ensureStudentSubject(studentId, universityId, subjectId);
     if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
     const data = await studentAiBridge.getQuizChapters(subjectId);
-    return data ?? { chapters: [] };
+    if (data?.chapters?.length) return { chapters: data.chapters, processing: false };
+
+    // Notes uploaded before the AI service was available do not have a mirrored
+    // AIDocument yet. Start processing them on demand so the chapter picker can
+    // recover without requiring faculty to re-upload every file.
+    const { enrollment, semester } = await getStudentEnrollment(studentId, universityId);
+    const notes = await prisma.note.findMany({
+      where: {
+        universityId,
+        subjectId,
+        deletedAt: null,
+        status: "PUBLISHED",
+        subject: { semesterNumber: semester.number },
+        targets: { some: { batchId: enrollment.batchId } },
+      },
+      select: { id: true, fileKey: true },
+      take: 50,
+    });
+    const now = Date.now();
+    await Promise.all(notes.map((note) => {
+      const lastTriggered = quizChapterTriggers.get(note.id) ?? 0;
+      if (now - lastTriggered < 30_000) return Promise.resolve();
+      quizChapterTriggers.set(note.id, now);
+      return bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(
+        note.id,
+        storageEnabled ? presignGetUrl(note.fileKey, 60 * 60) : undefined,
+      ));
+    }));
+    return {
+      chapters: [],
+      processing: notes.length > 0,
+      noteCount: notes.length,
+      message: notes.length > 0
+        ? "Faculty notes found. Chapters are being prepared."
+        : "No published faculty notes exist for this subject yet.",
+    };
   },
 
   async createStudentAiQuiz(studentId: string, universityId: string, body: { subjectId?: string; chapters?: string[]; questionCount?: number }) {

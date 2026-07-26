@@ -18,10 +18,12 @@ class GeminiDocumentService:
     """Provider wrapper so native Gemini file APIs can be swapped in later."""
 
     def __init__(self) -> None:
-        self.ai = SharedAIService(model=os.getenv("FREELLMAPI_DOCUMENT_MODEL") or None)
+        # This service is the Gemini-backed document/quiz path. Keep the model
+        # explicit so a generic router/default model cannot silently take over.
+        self.ai = SharedAIService(model=os.getenv("FREELLMAPI_DOCUMENT_MODEL") or "gemini-2.5-flash")
         self.fallback_ai = SharedAIService()
 
-    def json_chat(self, system: str, user: str, *, fallback: dict[str, Any]) -> dict[str, Any]:
+    def json_chat(self, system: str, user: str, *, fallback: dict[str, Any], allow_fallback: bool = True) -> dict[str, Any]:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -29,6 +31,8 @@ class GeminiDocumentService:
         try:
             reply = self.ai.chat(messages, temperature=0.1, response_format={"type": "json_object"})["reply"]
         except AIServiceError:
+            if not allow_fallback:
+                raise
             if self.ai.model == self.fallback_ai.model:
                 raise
             logger.warning("Configured document model failed; using the available text model for structured extraction.")
