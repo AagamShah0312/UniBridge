@@ -113,7 +113,9 @@ export const studentApi = {
     api.post(`/student/quizzes/${id}/submit`, { answers, presentation, autoSubmit }).then((r) => r.data),
   quizChapters: (subjectId: string) => api.get(`/student/quizzes/subjects/${subjectId}/chapters`).then((r) => r.data as { chapters: string[]; processing?: boolean; noteCount?: number; message?: string }),
   generateAiQuiz: (body: { subjectId: string; chapters: string[]; questionCount?: number }) =>
-    api.post('/student/quizzes/ai-generate', body).then((r) => r.data),
+    // Extracting a never-processed note and running two Gemini passes runs well
+    // past the client's 30s default, and a free-tier AI service may be cold too.
+    api.post('/student/quizzes/ai-generate', body, { timeout: 120_000 }).then((r) => r.data),
   deleteAiQuiz: (id: string) => api.delete(`/student/quizzes/${id}/ai-practice`).then((r) => r.data),
   renameAiQuiz: (id: string, title: string) => api.patch(`/student/quizzes/${id}/ai-practice`, { title }).then((r) => r.data),
 
