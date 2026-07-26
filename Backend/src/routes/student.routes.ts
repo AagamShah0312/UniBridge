@@ -186,7 +186,7 @@ studentRouter.post("/quizzes/:quizId/start", asyncHandler(async (req, res) => {
 }));
 
 studentRouter.post("/quizzes/:quizId/submit", asyncHandler(async (req, res) => {
-  res.json(await portalService.submitStudentQuiz(req.user!.id, req.user!.universityId, str(req.params.quizId), req.body.answers ?? {}, req.body.presentation ?? {}));
+  res.json(await portalService.submitStudentQuiz(req.user!.id, req.user!.universityId, str(req.params.quizId), req.body.answers ?? {}, req.body.presentation ?? {}, Boolean(req.body.autoSubmit)));
 }));
 
 studentRouter.get("/quizzes/:quizId", asyncHandler(async (req, res) => {

@@ -109,8 +109,8 @@ export const studentApi = {
   quizHistory: () => api.get('/student/quizzes/history').then((r) => r.data),
   quizResult: (id: string) => api.get(`/student/quizzes/${id}/result`).then((r) => r.data),
   startQuiz: (id: string) => api.post(`/student/quizzes/${id}/start`).then((r) => r.data),
-  submitQuiz: (id: string, answers: unknown, presentation?: unknown) =>
-    api.post(`/student/quizzes/${id}/submit`, { answers, presentation }).then((r) => r.data),
+  submitQuiz: (id: string, answers: unknown, presentation?: unknown, autoSubmit = false) =>
+    api.post(`/student/quizzes/${id}/submit`, { answers, presentation, autoSubmit }).then((r) => r.data),
   quizChapters: (subjectId: string) => api.get(`/student/quizzes/subjects/${subjectId}/chapters`).then((r) => r.data as { chapters: string[] }),
   generateAiQuiz: (body: { subjectId: string; chapters: string[]; questionCount?: number }) =>
     api.post('/student/quizzes/ai-generate', body).then((r) => r.data),

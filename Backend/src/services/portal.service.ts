@@ -250,6 +250,17 @@ function isQuizExpired(dueDate: Date | null): boolean {
     || (dueDate.getFullYear() === today.getFullYear() && (dueDate.getMonth() < today.getMonth() || (dueDate.getMonth() === today.getMonth() && dueDate.getDate() < today.getDate())));
 }
 
+function normalizeQuizOptions(value: unknown): Array<{ id: string; text: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 4).map((option, index) => {
+    if (option && typeof option === "object" && "text" in option) {
+      const item = option as { id?: unknown; text?: unknown };
+      return { id: String(item.id ?? String.fromCharCode(65 + index)), text: String(item.text ?? "") };
+    }
+    return { id: String.fromCharCode(65 + index), text: String(option ?? "") };
+  });
+}
+
 // ─────────────────────────────────────────────────────────────
 // DB Helper functions (async, Prisma-backed)
 // ─────────────────────────────────────────────────────────────
@@ -3331,14 +3342,14 @@ export const portalService = {
       ...question,
       // The underlying option id remains stable for scoring; labels are reset
       // after each shuffle so every student always sees A, B, C, D in order.
-      options: shuffle(question.options as Array<{ id: string; text: string }>).map((option, index) => ({ ...option, label: String.fromCharCode(65 + index) })),
+      options: shuffle(normalizeQuizOptions(question.options)).map((option, index) => ({ ...option, label: String.fromCharCode(65 + index) })),
     }));
     const startedAt = new Date().toISOString();
     const expiresAt = new Date(Date.now() + (quiz.timeLimitMins ?? 0) * 60000).toISOString();
     return { attemptId: `att_${Date.now()}`, attemptNumber: attemptsTaken + 1, quizId, title: quiz.title, timeLimitMins: quiz.timeLimitMins, startedAt, expiresAt, questions };
   },
 
-  async submitStudentQuiz(studentId: string, universityId: string, quizId: string, answers: Record<string, string>, presentation: Record<string, unknown> = {}) {
+  async submitStudentQuiz(studentId: string, universityId: string, quizId: string, answers: Record<string, string>, presentation: Record<string, unknown> = {}, autoSubmit = false) {
     const { enrollment } = await getStudentEnrollment(studentId, universityId);
     const quiz = await prisma.quiz.findFirst({ where: { id: quizId, isPublished: true, deletedAt: null, OR: [{ studentId }, { studentId: null, targets: { some: { batchId: enrollment.batchId } } }] } });
     if (!quiz) throw new ApiError(404, "NOT_FOUND", "Quiz not found.");
@@ -3346,7 +3357,7 @@ export const portalService = {
     const attemptsTaken = await prisma.quizAttempt.count({ where: { studentId, quizId } });
     if (attemptsTaken >= quiz.maxAttempts) throw new ApiError(409, "ATTEMPT_LIMIT_REACHED", "No quiz attempts remain.");
     const questions = await prisma.question.findMany({ where: { quizId }, orderBy: { order: "asc" } });
-    if (questions.some((q) => !answers[q.id])) throw new ApiError(400, "MISSING_ANSWERS", "Some quiz questions are unanswered.");
+    if (!autoSubmit && questions.some((q) => !answers[q.id])) throw new ApiError(400, "MISSING_ANSWERS", "Some quiz questions are unanswered.");
     const results = questions.map((q) => ({ questionId: q.id, questionText: q.text, options: q.options, selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation }));
     const correctCount = results.filter((r) => r.isCorrect).length;
     const score = questions.length === 0 ? 0 : Number(((correctCount / questions.length) * 100).toFixed(1));
@@ -3363,7 +3374,7 @@ export const portalService = {
     const byId = new Map(questions.map((question) => [question.id, question]));
     const orderedQuestions = (presentation.questionOrder ?? questions.map((question) => question.id)).map((id) => byId.get(id)).filter(Boolean) as typeof questions;
     const results = orderedQuestions.map((q) => {
-      const options = q.options as Array<{ id: string; text: string }>;
+      const options = normalizeQuizOptions(q.options);
       const optionOrder = presentation.optionOrder?.[q.id] ?? options.map((option) => option.id);
       const optionMap = new Map(options.map((option) => [option.id, option]));
       return { questionId: q.id, questionText: q.text, options: optionOrder.map((id, index) => { const option = optionMap.get(id); return option ? { ...option, label: String.fromCharCode(65 + index) } : null; }).filter(Boolean), selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation };
