@@ -81,6 +81,12 @@ export interface StudentQuiz {
   questionCount?: number
   isAttempted?: boolean
   score?: number | null
+  isAiGenerated?: boolean
+  isStudentGenerated?: boolean
+  chapters?: string[]
+  maxAttempts?: number
+  attemptsTaken?: number
+  status?: 'PENDING' | 'RETRY' | 'ATTEMPTED' | 'EXPIRED'
 }
 
 export interface StudentAnnouncement {

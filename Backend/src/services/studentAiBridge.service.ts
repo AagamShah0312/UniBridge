@@ -102,4 +102,15 @@ export const studentAiBridge = {
   triggerPyqProcessing(pyqId: string) {
     return requestInternal<{ pyq_id: string; status: string; job_id?: string }>(`pyqs/${pyqId}/process`, { method: "POST" });
   },
+
+  getQuizChapters(subjectId: string) {
+    return requestInternal<{ chapters: string[] }>(`quizzes/subjects/${subjectId}/chapters`);
+  },
+
+  generateQuiz(body: { studentId: string; subjectId: string; chapters: string[]; questionCount: number; seed: string }) {
+    return requestInternal<{ subject_id: string; chapters: string[]; questions: Array<{ text: string; options: string[]; correct_index: number; explanation: string; chapter: string }> }>("quizzes/generate", {
+      method: "POST",
+      body: JSON.stringify({ student_id: body.studentId, subject_id: body.subjectId, chapters: body.chapters, question_count: body.questionCount, seed: body.seed }),
+    });
+  },
 };

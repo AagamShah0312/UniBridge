@@ -156,6 +156,19 @@ studentRouter.delete("/self-notes/:selfNoteId", asyncHandler(async (req, res) =>
   res.status(204).send();
 }));
 
+studentRouter.get("/quizzes/subjects/:subjectId/chapters", asyncHandler(async (req, res) => {
+  res.json(await portalService.studentQuizChapters(req.user!.id, req.user!.universityId, str(req.params.subjectId)));
+}));
+
+studentRouter.post("/quizzes/ai-generate", asyncHandler(async (req, res) => {
+  res.status(201).json(await portalService.createStudentAiQuiz(req.user!.id, req.user!.universityId, req.body));
+}));
+
+studentRouter.delete("/quizzes/:quizId/ai-practice", asyncHandler(async (req, res) => {
+  await portalService.deleteStudentAiQuiz(req.user!.id, str(req.params.quizId));
+  res.status(204).send();
+}));
+
 studentRouter.get("/quizzes/history", asyncHandler(async (req, res) => {
   res.json(await portalService.studentQuizHistory(req.user!.id, req.user!.universityId, req.query as Record<string, string | number | undefined>));
 }));
@@ -169,7 +182,7 @@ studentRouter.post("/quizzes/:quizId/start", asyncHandler(async (req, res) => {
 }));
 
 studentRouter.post("/quizzes/:quizId/submit", asyncHandler(async (req, res) => {
-  res.json(await portalService.submitStudentQuiz(req.user!.id, req.user!.universityId, str(req.params.quizId), req.body.answers ?? {}));
+  res.json(await portalService.submitStudentQuiz(req.user!.id, req.user!.universityId, str(req.params.quizId), req.body.answers ?? {}, req.body.presentation ?? {}));
 }));
 
 studentRouter.get("/quizzes/:quizId", asyncHandler(async (req, res) => {
@@ -288,6 +301,7 @@ studentRouter.get("/ai/smart-notes/:noteId/summary", asyncHandler(async (req, re
 studentRouter.get("/ai/marks-prediction", asyncHandler(async (req, res) => {
   res.json(await portalService.studentMarksPrediction(req.user!.id));
 }));
+
 
 studentRouter.get("/study-planner/ai-status/:jobId", asyncHandler(async (req, res) => {
   res.json(await portalService.studentStudyPlannerAiStatus(str(req.params.jobId)));
