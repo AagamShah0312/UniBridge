@@ -125,6 +125,7 @@ class Note(PrismaMirrorModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     subject = models.ForeignKey(Subject, on_delete=models.DO_NOTHING, db_column="subjectId", related_name="notes")
     faculty_id = models.UUIDField(db_column="facultyId")
+    folder = models.ForeignKey("NoteFolder", on_delete=models.DO_NOTHING, null=True, blank=True, db_column="folderId", related_name="notes")
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     file_url = models.CharField(max_length=500, db_column="fileUrl")
@@ -139,6 +140,21 @@ class Note(PrismaMirrorModel):
 
     class Meta(PrismaMirrorModel.Meta):
         db_table = "notes"
+
+
+class NoteFolder(PrismaMirrorModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    university_id = models.UUIDField(db_column="universityId")
+    subject = models.ForeignKey(Subject, on_delete=models.DO_NOTHING, db_column="subjectId", related_name="note_folders")
+    parent_id = models.UUIDField(null=True, blank=True, db_column="parentId")
+    name = models.CharField(max_length=255)
+    is_system = models.BooleanField(default=False, db_column="isSystem")
+    created_at = models.DateTimeField(auto_now_add=True, db_column="createdAt")
+    updated_at = models.DateTimeField(auto_now=True, db_column="updatedAt")
+    deleted_at = models.DateTimeField(null=True, blank=True, db_column="deletedAt")
+
+    class Meta(PrismaMirrorModel.Meta):
+        db_table = "note_folders"
 
 
 class Flashcard(PrismaMirrorModel):

@@ -42,6 +42,15 @@ export async function djangoAiPost<T>(path: string, body?: unknown): Promise<T> 
   }
 }
 
+export async function djangoAiPatch<T>(path: string, body?: unknown): Promise<T> {
+  try {
+    const response = await djangoAiApi.patch<DjangoResponse<T>>(path, body)
+    return unwrapDjangoResponse(response.data)
+  } catch (err) {
+    throw new Error(djangoAiErrorMessage(err))
+  }
+}
+
 export async function djangoAiDelete<T>(path: string): Promise<T> {
   try {
     const response = await djangoAiApi.delete<DjangoResponse<T>>(path)

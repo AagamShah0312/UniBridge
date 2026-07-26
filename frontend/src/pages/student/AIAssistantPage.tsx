@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { BarChart3, BrainCircuit, Plus, RefreshCcw, Send, Sparkles, Target, Trash2 } from 'lucide-react'
+import { BarChart3, BrainCircuit, Pencil, Plus, RefreshCcw, Send, Sparkles, Target, Trash2 } from 'lucide-react'
 import { studentApi } from '@/api/student'
 import { errorMessage } from '@/api/client'
 import { PageShell } from '@/components/shared/PageShell'
@@ -121,6 +121,14 @@ export default function AIAssistantPage() {
       toast.error(errorMessage(e))
     },
   })
+  const rename = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => studentApi.renameAiConversation(id, title),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['student', 'ai-convs'] })
+      await qc.invalidateQueries({ queryKey: ['student', 'ai-conv', selectedId] })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -226,6 +234,14 @@ export default function AIAssistantPage() {
                         </span>
                       </button>
                       <div className="flex justify-end px-3 pb-2">
+                        <button
+                          type="button"
+                          onClick={() => { const title = window.prompt('Chat title', item.title); if (title?.trim() && title.trim() !== item.title) rename.mutate({ id: item.id, title }) }}
+                          className="mr-3 text-text-muted transition hover:text-primary"
+                          aria-label="Rename conversation"
+                        >
+                          <Pencil size={13} />
+                        </button>
                         <button
                           type="button"
                           onClick={() => del.mutate(item.id)}

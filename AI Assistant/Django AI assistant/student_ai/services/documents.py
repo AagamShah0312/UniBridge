@@ -31,10 +31,15 @@ def _extract_from_path(path: Path) -> str:
     if suffix in TEXT_EXTENSIONS:
         return path.read_text(encoding="utf-8", errors="ignore")
     if suffix == ".pdf":
-        from PyPDF2 import PdfReader
+        # PyMuPDF handles modern PDFs more reliably than PyPDF2 and keeps page
+        # extraction compatible with the scanned-page image fallback below.
+        import fitz
 
-        reader = PdfReader(str(path))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        pdf = fitz.open(str(path))
+        try:
+            return "\n".join(page.get_text("text") for page in pdf)
+        finally:
+            pdf.close()
     if suffix == ".docx":
         from docx import Document
 

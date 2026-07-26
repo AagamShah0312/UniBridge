@@ -1,5 +1,5 @@
 import { api } from './client'
-import { djangoAiDelete, djangoAiGet, djangoAiPost } from './djangoAiClient'
+import { djangoAiDelete, djangoAiGet, djangoAiPatch, djangoAiPost } from './djangoAiClient'
 import type * as T from '@/types/student'
 
 type Params = Record<string, string | number | boolean | undefined>
@@ -115,6 +115,7 @@ export const studentApi = {
   generateAiQuiz: (body: { subjectId: string; chapters: string[]; questionCount?: number }) =>
     api.post('/student/quizzes/ai-generate', body).then((r) => r.data),
   deleteAiQuiz: (id: string) => api.delete(`/student/quizzes/${id}/ai-practice`).then((r) => r.data),
+  renameAiQuiz: (id: string, title: string) => api.patch(`/student/quizzes/${id}/ai-practice`, { title }).then((r) => r.data),
 
   announcements: (params?: Params) =>
     api.get<T.PaginatedAnnouncements>('/student/announcements', { params }).then((r) => r.data),
@@ -155,6 +156,7 @@ export const studentApi = {
   sendAiMessage: (id: string, content: string) =>
     djangoAiPost(`/chats/${id}/messages`, { message: content }),
   deleteAiConversation: (id: string) => djangoAiDelete(`/chats/${id}`),
+  renameAiConversation: (id: string, title: string) => djangoAiPatch(`/chats/${id}`, { title }),
   pyqAnalysis: async (subjectId: string) => {
     const data = await djangoAiGet<DjangoPyqPrediction>(`/pyqs/subjects/${subjectId}/predictions`)
     return normalizePyqPrediction(data, subjectId)

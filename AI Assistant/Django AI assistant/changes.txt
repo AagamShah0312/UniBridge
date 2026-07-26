@@ -1,4 +1,2 @@
-The options should be jumbled : Yes. but the sequence should be A,B,C,D only .
-There is files in T4 folder also, but chapters onl has dotnet option in it.
-I added another file named UNIT-10 NETWORK FLOW AND TREES_NOTES. but when i ask to generate MCQs it says the 30000ms timout has happened. That should not happen. 
-There should be a delete Quiz button ( only for AI generated Quiz)
+Continue the task, also at this moment, there is a 500 status code wrror whenever i try to generate new Quiz. Use PyMuPDF to read pdf text with image. The faculty is able to make its own quiz but it is inaccessible by student. whenever i try to attempt the quiz gives 410 Error.
+Also solve the bug of Quiz not able to recognize the folders. Add a rename button for AI generated quiz only and also a rename button in AI assistant chat

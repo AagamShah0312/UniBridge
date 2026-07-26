@@ -9,14 +9,20 @@ from .gemini_service import GeminiDocumentService
 from student_ai.models import AIDocumentChunk, Subject
 
 
+def _chapter_label(chunk: AIDocumentChunk) -> str:
+    title = (chunk.document.note.title if chunk.document.note_id else chunk.document.title).strip()
+    folder = chunk.document.note.folder.name.strip() if chunk.document.note_id and chunk.document.note.folder_id else ""
+    return f"{folder} / {title}" if folder else title
+
+
 def available_chapters(subject_id: str) -> list[str]:
     chunks = AIDocumentChunk.objects.filter(
         subject_id=subject_id,
         document__processing_status="completed",
-    ).select_related("document").order_by("document__title", "chunk_index")
+    ).select_related("document__note__folder").order_by("document__title", "chunk_index")
     labels: OrderedDict[str, None] = OrderedDict()
     for chunk in chunks:
-        label = (chunk.chapter_name or chunk.unit_name or chunk.document.title or "").strip()
+        label = _chapter_label(chunk)
         if label:
             labels.setdefault(label, None)
     return list(labels.keys())
@@ -27,12 +33,12 @@ def _matching_chunks(subject_id: str, chapters: list[str]) -> list[AIDocumentChu
     chunks = list(AIDocumentChunk.objects.filter(
         subject_id=subject_id,
         document__processing_status="completed",
-    ).select_related("document").order_by("document__title", "chunk_index"))
+    ).select_related("document__note__folder").order_by("document__title", "chunk_index"))
     if not normalized:
         return chunks
     return [
         chunk for chunk in chunks
-        if (chunk.chapter_name or chunk.unit_name or chunk.document.title or "").strip().casefold() in normalized
+        if _chapter_label(chunk).casefold() in normalized
     ]
 
 
@@ -73,7 +79,7 @@ def generate_quiz(subject_id: str, chapters: list[str], question_count: int, see
     # Keep synchronous quiz generation below the web client's timeout. If the
     # provider cannot answer quickly, the note-grounded local fallback is used.
     context = "\n\n".join(
-        f"[Chapter: {chunk.chapter_name or chunk.unit_name or chunk.document.title}]\n{chunk.content}"
+        f"[Chapter: {_chapter_label(chunk)}]\n{chunk.content}"
         for chunk in chunks
     )[:12000]
     requested = max(4, min(int(question_count or 10), 20))
