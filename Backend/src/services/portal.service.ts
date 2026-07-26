@@ -617,6 +617,44 @@ async function ensureStudentSubject(studentId: string, universityId: string, sub
   }
 }
 
+type QuizNote = { id: string; title: string; fileKey: string; folder: { name: string } | null };
+
+/** One selectable entry per faculty note, labelled "<folder> / <title>" so the
+ *  T-1…T-4 folders faculty upload into stay visible in the quiz picker. */
+function quizNoteLabel(note: QuizNote) {
+  const folder = note.folder?.name.trim() ?? "";
+  const title = note.title.trim();
+  return folder ? `${folder} / ${title}` : title;
+}
+
+/** The notes a student may build a quiz from. Resolved here rather than in the
+ *  Django service because publication status and batch targeting — the rules that
+ *  decide what a student is allowed to see — only exist in Prisma. */
+async function studentQuizNotes(studentId: string, universityId: string, subjectId: string): Promise<QuizNote[]> {
+  const { enrollment } = await getStudentEnrollment(studentId, universityId);
+  return prisma.note.findMany({
+    where: { universityId, subjectId, deletedAt: null, status: "PUBLISHED", targets: { some: { batchId: enrollment.batchId } } },
+    select: { id: true, title: true, fileKey: true, folder: { select: { name: true } } },
+    orderBy: [{ folder: { name: "asc" } }, { title: "asc" }],
+    take: 100,
+  });
+}
+
+/** Warm AI extraction for notes that have never been processed, so generation is
+ *  fast later. Throttled per note; failures are ignored because generation falls
+ *  back to extracting on demand. */
+function warmQuizNotes(notes: QuizNote[]) {
+  const now = Date.now();
+  for (const note of notes) {
+    if (now - (quizChapterTriggers.get(note.id) ?? 0) < 30_000) continue;
+    quizChapterTriggers.set(note.id, now);
+    void bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(
+      note.id,
+      storageEnabled ? presignGetUrl(note.fileKey, 60 * 60) : undefined,
+    ));
+  }
+}
+
 async function getStudentMentorAssignment(studentId: string, universityId: string, semesterId?: string) {
   const { semester } = await getStudentEnrollment(studentId, universityId, semesterId);
   return getMentorAssignment(studentId, semester.id);
@@ -3517,54 +3555,33 @@ export const portalService = {
 
   async studentQuizChapters(studentId: string, universityId: string, subjectId: string) {
     await ensureStudentSubject(studentId, universityId, subjectId);
-    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
-    const data = await studentAiBridge.getQuizChapters(subjectId);
-    if (data?.chapters?.length) return { chapters: data.chapters, processing: false };
-
-    // Notes uploaded before the AI service was available do not have a mirrored
-    // AIDocument yet. Start processing them on demand so the chapter picker can
-    // recover without requiring faculty to re-upload every file.
-    const { enrollment, semester } = await getStudentEnrollment(studentId, universityId);
-    const notes = await prisma.note.findMany({
-      where: {
-        universityId,
-        subjectId,
-        deletedAt: null,
-        status: "PUBLISHED",
-        subject: { semesterNumber: semester.number },
-        targets: { some: { batchId: enrollment.batchId } },
-      },
-      select: { id: true, fileKey: true },
-      take: 50,
-    });
-    const now = Date.now();
-    await Promise.all(notes.map((note) => {
-      const lastTriggered = quizChapterTriggers.get(note.id) ?? 0;
-      if (now - lastTriggered < 30_000) return Promise.resolve();
-      quizChapterTriggers.set(note.id, now);
-      return bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(
-        note.id,
-        storageEnabled ? presignGetUrl(note.fileKey, 60 * 60) : undefined,
-      ));
-    }));
-    return {
-      chapters: [],
-      processing: notes.length > 0,
-      noteCount: notes.length,
-      message: notes.length > 0
-        ? "Faculty notes found. Chapters are being prepared."
-        : "No published faculty notes exist for this subject yet.",
-    };
+    // Listed straight from the faculty notes, not from Django's processed chunks:
+    // a note that has never been ingested is still selectable, and generation
+    // extracts it on demand. That keeps the picker populated instead of showing
+    // "no processed notes" whenever ingestion has not run yet.
+    const notes = await studentQuizNotes(studentId, universityId, subjectId);
+    if (!notes.length) {
+      return { chapters: [], processing: false, noteCount: 0, message: "No published faculty notes exist for this subject yet." };
+    }
+    warmQuizNotes(notes);
+    return { chapters: notes.map(quizNoteLabel), processing: false, noteCount: notes.length };
   },
 
   async createStudentAiQuiz(studentId: string, universityId: string, body: { subjectId?: string; chapters?: string[]; questionCount?: number }) {
     if (!body.subjectId) throw new ApiError(400, "SUBJECT_REQUIRED", "Choose a subject.");
     await ensureStudentSubject(studentId, universityId, body.subjectId);
     const { semester } = await getStudentEnrollment(studentId, universityId);
-    const chapters = [...new Set((body.chapters ?? []).map((chapter) => String(chapter).trim()).filter(Boolean))];
-    if (!chapters.length) throw new ApiError(400, "CHAPTER_REQUIRED", "Choose at least one chapter.");
-    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
-    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
+    const requested = [...new Set((body.chapters ?? []).map((chapter) => String(chapter).trim()).filter(Boolean))];
+    if (!requested.length) throw new ApiError(400, "CHAPTER_REQUIRED", "Choose at least one chapter.");
+    // Resolve the picked labels against the notes this student is allowed to see,
+    // then generate from those note ids. Django cannot make this call — it mirrors
+    // neither publication status nor batch targeting.
+    const wanted = new Set(requested.map((chapter) => chapter.toLowerCase()));
+    const picked = (await studentQuizNotes(studentId, universityId, body.subjectId)).filter((note) => wanted.has(quizNoteLabel(note).toLowerCase()));
+    if (!picked.length) throw new ApiError(404, "NOTE_NOT_FOUND", "The selected faculty notes are no longer available.");
+    const chapters = picked.map(quizNoteLabel);
+    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is not configured. Set DJANGO_AI_BASE_URL and DJANGO_AI_SERVICE_TOKEN on the API deployment.");
+    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, noteIds: picked.map((note) => note.id), questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
     if (!generated?.questions?.length) throw new ApiError(422, "QUIZ_GENERATION_FAILED", "No questions could be generated from the selected notes.");
     const subject = await subjectById(body.subjectId);
     const quiz = await prisma.quiz.create({ data: { studentId, subjectId: body.subjectId, semesterId: semester.id, title: `${subject.code} AI practice quiz`, description: `Generated from: ${chapters.join(", ")}`, isAiGenerated: true, isPublished: true, maxAttempts: 3, chapterNames: chapters, questions: { create: generated.questions.map((question, index) => ({ text: question.text, options: question.options.map((text, optionIndex) => ({ id: String.fromCharCode(65 + optionIndex), text })), correctOption: String.fromCharCode(65 + question.correct_index), explanation: question.explanation || null, order: index })) } }, include: { _count: { select: { questions: true } } } });

@@ -5,46 +5,86 @@ from collections import OrderedDict
 
 from .ai_service import AIServiceError
 from .gemini_service import GeminiDocumentService
-from student_ai.models import AIDocumentChunk, Subject
+from student_ai.models import AIDocumentChunk, Note, Subject
 
 
-def _note_label(chunk: AIDocumentChunk) -> str:
-    title = (chunk.document.note.title if chunk.document.note_id else chunk.document.title).strip()
-    folder = chunk.document.note.folder.name.strip() if chunk.document.note_id and chunk.document.note.folder_id else ""
+def _note_label(note: Note) -> str:
+    """One selectable entry per faculty note, shown as "<folder> / <title>" so the
+    T-1…T-4 folders faculty upload into stay visible in the picker."""
+    title = (note.title or "").strip()
+    folder = note.folder.name.strip() if note.folder_id and note.folder else ""
     return f"{folder} / {title}" if folder else title
 
 
-def _chapter_label(chunk: AIDocumentChunk) -> str:
-    # Prefer the AI-extracted chapter/unit so students get real, selectable
-    # chapters; fall back to the note's folder/title when a chunk lacks them.
-    return (chunk.chapter_name or chunk.unit_name or "").strip() or _note_label(chunk)
+def _subject_notes(subject_id: str) -> list[Note]:
+    return list(
+        Note.objects.filter(subject_id=subject_id, deleted_at__isnull=True)
+        .select_related("folder")
+        .order_by("folder__name", "title")
+    )
 
 
 def available_chapters(subject_id: str) -> list[str]:
-    chunks = AIDocumentChunk.objects.filter(
-        subject_id=subject_id,
-        document__processing_status="completed",
-    ).select_related("document__note__folder").order_by("document__title", "chunk_index")
+    # Listed from the faculty notes themselves rather than from processed chunks:
+    # a note that has not been through AI ingestion yet is still selectable and
+    # gets extracted on demand in _chunks_for_notes().
     labels: OrderedDict[str, None] = OrderedDict()
-    for chunk in chunks:
-        label = _chapter_label(chunk)
+    for note in _subject_notes(subject_id):
+        label = _note_label(note)
         if label:
             labels.setdefault(label, None)
     return list(labels.keys())
 
 
-def _matching_chunks(subject_id: str, chapters: list[str]) -> list[AIDocumentChunk]:
-    normalized = {chapter.strip().casefold() for chapter in chapters if chapter.strip()}
-    chunks = list(AIDocumentChunk.objects.filter(
-        subject_id=subject_id,
-        document__processing_status="completed",
-    ).select_related("document__note__folder").order_by("document__title", "chunk_index"))
-    if not normalized:
-        return chunks
-    return [
-        chunk for chunk in chunks
-        if _chapter_label(chunk).casefold() in normalized
-    ]
+def _selected_notes(subject_id: str, chapters: list[str], note_ids: list[str] | None) -> list[Note]:
+    notes = _subject_notes(subject_id)
+    if note_ids:
+        # The API layer resolved these against the student's publication and batch
+        # visibility, which this service does not mirror; trust that list only.
+        wanted_ids = {str(note_id) for note_id in note_ids}
+        return [note for note in notes if str(note.id) in wanted_ids]
+    wanted = {chapter.strip().casefold() for chapter in chapters if isinstance(chapter, str) and chapter.strip()}
+    if not wanted:
+        return notes
+    return [note for note in notes if _note_label(note).casefold() in wanted]
+
+
+def _chunks_for_notes(notes: list[Note]) -> tuple[list[AIDocumentChunk], list[str]]:
+    """Extracted chunks for the picked notes, ingesting any that were never
+    processed. Returns the chunks plus one message per note that could not be
+    extracted, so the caller can explain the failure instead of guessing."""
+    # Imported here: ingestion_service pulls in PyMuPDF/embeddings, which the
+    # chapter listing has no reason to load.
+    from .ingestion_service import process_note_document
+
+    def stored(note: Note) -> list[AIDocumentChunk]:
+        return list(
+            AIDocumentChunk.objects.filter(
+                document__note_id=note.id,
+                document__processing_status="completed",
+            ).order_by("chunk_index")
+        )
+
+    chunks: list[AIDocumentChunk] = []
+    failures: list[str] = []
+    for note in notes:
+        found = stored(note)
+        if not found:
+            try:
+                process_note_document(note)
+            except Exception as exc:  # noqa: BLE001 - reported back to the student
+                failures.append(f"{_note_label(note)}: {exc}")
+                continue
+            found = stored(note)
+        if found:
+            chunks.extend(found)
+        else:
+            failures.append(f"{_note_label(note)}: no extractable text")
+    return chunks, failures
+
+
+def _chunk_heading(chunk: AIDocumentChunk) -> str:
+    return (chunk.chapter_name or chunk.unit_name or "").strip() or "section"
 
 
 GENERIC_STEM = "which statement is supported by the selected faculty note"
@@ -84,46 +124,67 @@ def _valid_question(item: object, context: str, seen: set[str]) -> dict | None:
     }
 
 
-def generate_quiz(subject_id: str, chapters: list[str], question_count: int, seed: str) -> dict:
+def generate_quiz(subject_id: str, chapters: list[str], question_count: int, seed: str, note_ids: list[str] | None = None) -> dict:
     subject = Subject.objects.get(pk=subject_id)
     selected = [chapter.strip() for chapter in chapters if isinstance(chapter, str) and chapter.strip()]
-    chunks = _matching_chunks(subject_id, selected)
+    notes = _selected_notes(subject_id, selected, note_ids)
+    if not notes:
+        raise ValueError("Select at least one faculty note to generate questions from.")
+    chunks, failures = _chunks_for_notes(notes)
     if not chunks:
-        raise ValueError("No processed faculty-note chunks are available for the selected chapters.")
+        detail = f" ({'; '.join(failures)})" if failures else ""
+        raise ValueError(f"The selected faculty notes have no extractable text{detail}.")
 
-    # Send extracted, semantically chunked faculty-note content to Gemini.
+    # Send the extracted, semantically chunked faculty-note text to Gemini. This
+    # is the material the questions are written from — nothing is templated.
     context = "\n\n".join(
-        f"[Chapter: {_chapter_label(chunk)}]\n{chunk.content}"
+        f"[{_chunk_heading(chunk)}]\n{chunk.content}"
         for chunk in chunks
     )[:24000]
     requested = max(4, min(int(question_count or 10), 20))
     system = "You are a university assessment author. Create content-grounded MCQs from the supplied faculty notes. Return JSON only."
-    prompt = f"""Create exactly {requested} substantially different MCQs for {subject.code} - {subject.name}.
+
+    def build_prompt(count: int, stricter: bool) -> str:
+        extra = (
+            "\nThe previous attempt returned unusable questions. Quote concrete terms, definitions, "
+            "formulas, or examples that appear verbatim in the context in every stem.\n"
+            if stricter else ""
+        )
+        return f"""Create exactly {count} substantially different MCQs for {subject.code} - {subject.name}.
 Use only the supplied extracted faculty-note context. Test the actual concepts, definitions, formulas, algorithms, examples, and relationships in that context.
 Vary the question types across definition, concept application, comparison, sequence/process, scenario, and calculation when supported by the material.
 Every question must name a concrete concept from the context. Never use a generic stem such as "Which statement is supported by the selected faculty note?" or ask about the existence of the notes.
 Each question needs exactly four plausible, distinct options and one correct answer. Do not copy the same stem or answer pattern repeatedly.
 Do not mention source text, AI, or 'according to the note'. Use the seed to vary question coverage: {seed}.
 Return this exact JSON shape: {{"questions":[{{"text":"...","options":["...","...","...","..."],"correct_index":0,"explanation":"...","chapter":"..."}}]}}.
-
+{extra}
 FACULTY NOTE CONTEXT:
 {context}
 """
+
     questions: list[dict] = []
+    seen: set[str] = set()
     try:
         service = GeminiDocumentService()
         service.ai.timeout = max(service.ai.timeout, 30)
         service.ai.max_retries = max(service.ai.max_retries, 2)
-        payload = service.json_chat(system, prompt, fallback={"questions": []}, allow_fallback=False)
-        seen: set[str] = set()
-        for item in payload.get("questions", []) if isinstance(payload, dict) else []:
-            question = _valid_question(item, context, seen)
-            if question:
-                questions.append(question)
-            if len(questions) >= requested:
+        # Two passes: the validator below drops off-context or duplicated stems,
+        # so one short reply would otherwise fail the whole generation.
+        for attempt in range(2):
+            missing = requested - len(questions)
+            if missing <= 0:
                 break
+            payload = service.json_chat(system, build_prompt(missing, attempt > 0), fallback={"questions": []}, allow_fallback=False)
+            for item in payload.get("questions", []) if isinstance(payload, dict) else []:
+                question = _valid_question(item, context, seen)
+                if question:
+                    questions.append(question)
+                if len(questions) >= requested:
+                    break
     except AIServiceError as exc:
         raise ValueError(f"Gemini quiz generation is unavailable: {exc}") from exc
     if len(questions) < 4:
         raise ValueError("Gemini returned too few content-grounded questions. Try again or select more processed notes.")
-    return {"subject_id": str(subject.id), "chapters": selected, "questions": questions}
+    # Report the notes actually used, so "Generated from: …" stays accurate when
+    # the student selected nothing and every note was used.
+    return {"subject_id": str(subject.id), "chapters": [_note_label(note) for note in notes], "questions": questions}
