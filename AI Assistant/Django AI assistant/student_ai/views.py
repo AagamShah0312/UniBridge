@@ -368,6 +368,7 @@ class InternalQuizGenerateView(APIView):
                 int(body.get("question_count", 10)),
                 str(body.get("seed", "practice")),
                 note_ids=body.get("note_ids") if isinstance(body.get("note_ids"), list) else None,
+                note_urls=body.get("note_urls") if isinstance(body.get("note_urls"), dict) else None,
             )
         except (Subject.DoesNotExist, ValueError) as exc:
             return Response({"success": False, "message": "Quiz generation failed.", "error": {"code": "QUIZ_GENERATION_FAILED", "details": str(exc)}}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)

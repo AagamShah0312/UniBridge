@@ -3581,7 +3581,13 @@ export const portalService = {
     if (!picked.length) throw new ApiError(404, "NOTE_NOT_FOUND", "The selected faculty notes are no longer available.");
     const chapters = picked.map(quizNoteLabel);
     if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is not configured. Set DJANGO_AI_BASE_URL and DJANGO_AI_SERVICE_TOKEN on the API deployment.");
-    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, noteIds: picked.map((note) => note.id), questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
+    // Django extracts any not-yet-ingested note on demand, but the stored file_url is a
+    // raw S3 path it cannot GET (403). Hand it a short-lived presigned URL per note so the
+    // fetch succeeds — same mechanism the upload path uses for triggerNoteProcessing.
+    const noteUrls = storageEnabled
+      ? Object.fromEntries(picked.map((note) => [note.id, presignGetUrl(note.fileKey, 60 * 60)]))
+      : {};
+    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, noteIds: picked.map((note) => note.id), noteUrls, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
     if (!generated?.questions?.length) throw new ApiError(422, "QUIZ_GENERATION_FAILED", "No questions could be generated from the selected notes.");
     const subject = await subjectById(body.subjectId);
     const quiz = await prisma.quiz.create({ data: { studentId, subjectId: body.subjectId, semesterId: semester.id, title: `${subject.code} AI practice quiz`, description: `Generated from: ${chapters.join(", ")}`, isAiGenerated: true, isPublished: true, maxAttempts: 3, chapterNames: chapters, questions: { create: generated.questions.map((question, index) => ({ text: question.text, options: question.options.map((text, optionIndex) => ({ id: String.fromCharCode(65 + optionIndex), text })), correctOption: String.fromCharCode(65 + question.correct_index), explanation: question.explanation || null, order: index })) } }, include: { _count: { select: { questions: true } } } });

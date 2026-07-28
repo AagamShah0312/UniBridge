@@ -49,13 +49,17 @@ def _selected_notes(subject_id: str, chapters: list[str], note_ids: list[str] | 
     return [note for note in notes if _note_label(note).casefold() in wanted]
 
 
-def _chunks_for_notes(notes: list[Note]) -> tuple[list[AIDocumentChunk], list[str]]:
+def _chunks_for_notes(notes: list[Note], note_urls: dict[str, str] | None = None) -> tuple[list[AIDocumentChunk], list[str]]:
     """Extracted chunks for the picked notes, ingesting any that were never
-    processed. Returns the chunks plus one message per note that could not be
+    processed. note_urls maps note id → a presigned GET URL: the stored file_url
+    is a raw S3 path Django cannot fetch (403), so the API hands us a signed one
+    per note. Returns the chunks plus one message per note that could not be
     extracted, so the caller can explain the failure instead of guessing."""
     # Imported here: ingestion_service pulls in PyMuPDF/embeddings, which the
     # chapter listing has no reason to load.
     from .ingestion_service import process_note_document
+
+    urls = note_urls or {}
 
     def stored(note: Note) -> list[AIDocumentChunk]:
         return list(
@@ -71,7 +75,7 @@ def _chunks_for_notes(notes: list[Note]) -> tuple[list[AIDocumentChunk], list[st
         found = stored(note)
         if not found:
             try:
-                process_note_document(note)
+                process_note_document(note, source_url=urls.get(str(note.id)))
             except Exception as exc:  # noqa: BLE001 - reported back to the student
                 failures.append(f"{_note_label(note)}: {exc}")
                 continue
@@ -124,13 +128,13 @@ def _valid_question(item: object, context: str, seen: set[str]) -> dict | None:
     }
 
 
-def generate_quiz(subject_id: str, chapters: list[str], question_count: int, seed: str, note_ids: list[str] | None = None) -> dict:
+def generate_quiz(subject_id: str, chapters: list[str], question_count: int, seed: str, note_ids: list[str] | None = None, note_urls: dict[str, str] | None = None) -> dict:
     subject = Subject.objects.get(pk=subject_id)
     selected = [chapter.strip() for chapter in chapters if isinstance(chapter, str) and chapter.strip()]
     notes = _selected_notes(subject_id, selected, note_ids)
     if not notes:
         raise ValueError("Select at least one faculty note to generate questions from.")
-    chunks, failures = _chunks_for_notes(notes)
+    chunks, failures = _chunks_for_notes(notes, note_urls)
     if not chunks:
         detail = f" ({'; '.join(failures)})" if failures else ""
         raise ValueError(f"The selected faculty notes have no extractable text{detail}.")
