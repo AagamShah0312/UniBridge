@@ -1078,6 +1078,28 @@ model AttendanceCoordinator {
   @@map("attendance_coordinators")
 }
 
+// A one-day proxy for a timetable lecture: the coordinator reassigns a specific
+// slot on a specific date to a stand-in faculty. The original faculty stops
+// seeing that lecture in "today's lectures"; the proxy starts seeing it, and
+// their submitted attendance is attributed to whoever actually took it.
+model ProxyLecture {
+  id                String   @id @default(uuid()) @db.Uuid
+  universityId      String   @db.Uuid
+  semesterId        String   @db.Uuid
+  slotId            String   @db.Uuid
+  lectureDate       DateTime @db.Date
+  originalFacultyId String   @db.Uuid
+  proxyFacultyId    String   @db.Uuid
+  assignedById      String   @db.Uuid // coordinator faculty id
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([slotId, lectureDate])
+  @@index([proxyFacultyId, lectureDate])
+  @@index([originalFacultyId, lectureDate])
+  @@map("proxy_lectures")
+}
+
 // Paper-checking duty: coordinator assigns an enrollment-no range of one
 // batch+subject+phase to a faculty. Marks land in Result keyed the same way.
 model PaperCheckAssignment {

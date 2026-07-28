@@ -208,9 +208,23 @@ facultyRouter.get("/attendance/students-below-threshold", asyncHandler(async (re
   );
 }));
 
-// ── Attendance coordinator: status + report PDFs ──
+// Today's lectures for this faculty, straight from the timetable (no batch picker).
+facultyRouter.get("/attendance/today", asyncHandler(async (req, res) => {
+  res.json(await portalService.facultyTodayLectures(req.user!.id, req.user!.universityId));
+}));
+
+// ── Attendance coordinator: status + report PDFs + proxy management ──
 facultyRouter.get("/attendance/coordinator/status", asyncHandler(async (req, res) => {
   res.json(await portalService.facultyAttendanceCoordinatorStatus(req.user!.id, req.user!.universityId));
+}));
+facultyRouter.get("/attendance/coordinator/proxies", asyncHandler(async (req, res) => {
+  res.json(await portalService.attendanceCoordinatorProxies(req.user!.id, req.user!.universityId, String(req.query.date ?? "")));
+}));
+facultyRouter.post("/attendance/coordinator/proxies", asyncHandler(async (req, res) => {
+  res.json(await portalService.assignProxyLecture(req.user!.id, req.user!.universityId, String(req.body.slotId), String(req.body.date), String(req.body.proxyFacultyId)));
+}));
+facultyRouter.delete("/attendance/coordinator/proxies", asyncHandler(async (req, res) => {
+  res.json(await portalService.removeProxyLecture(req.user!.id, req.user!.universityId, String(req.query.slotId ?? ""), String(req.query.date ?? "")));
 }));
 facultyRouter.get("/attendance/coordinator/daily-pdf", asyncHandler(async (req, res) => {
   const pdf = await portalService.dailyAttendancePdf(req.user!.id, req.user!.universityId, String(req.query.date ?? ""));

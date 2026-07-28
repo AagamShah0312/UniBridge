@@ -158,3 +158,31 @@ export interface ChatMsg {
   isRead: boolean
   sentAt: string
 }
+
+// ── Timetable-driven today's lectures ──
+export interface TodayLectureStudent { enrollmentId: string; rollNo: string; name: string; enrollmentNo: string }
+export interface TodayLecture {
+  slotId: string; batchId: string; batchCode: string
+  subjectId: string; subjectCode: string; subjectName: string
+  slotStart: string; slotEnd: string; room: string | null; isProxy: boolean
+  students: TodayLectureStudent[]
+  marks: Record<string, boolean>
+}
+export interface TodayLectures {
+  date: string; dayOfWeek: number; isEditable: boolean
+  dayStatus: { isWorkingDay: boolean; status: string; reason?: string | null }
+  lectures: TodayLecture[]
+}
+
+// ── Coordinator proxy management ──
+export interface ProxyFacultyOption { id: string; name: string; employeeId: string }
+export interface ProxyLectureRow {
+  slotId: string; batchCode: string; subjectCode: string; slotStart: string; slotEnd: string
+  originalFacultyId: string | null; originalFaculty: string
+  proxyFacultyId: string | null; proxyFaculty: string | null
+}
+export interface ProxyLectures {
+  semesterId: string; date: string
+  lectures: ProxyLectureRow[]
+  facultyOptions: ProxyFacultyOption[]
+}

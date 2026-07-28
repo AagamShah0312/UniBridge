@@ -49,6 +49,9 @@ export const facultyApi = {
 
   attendancePending: () => api.get('/faculty/attendance/pending').then((r) => r.data),
 
+  // Timetable-driven: this faculty's lectures for today, across all batches.
+  todayLectures: () => api.get<T.TodayLectures>('/faculty/attendance/today').then((r) => r.data),
+
   // Attendance-coordinator role: gate the page, then stream the report PDFs.
   attendanceCoordinatorStatus: () =>
     api.get<{ isCoordinator: boolean; semesterId: string; semesterLabel: string }>('/faculty/attendance/coordinator/status').then((r) => r.data),
@@ -56,6 +59,12 @@ export const facultyApi = {
     downloadFile('/faculty/attendance/coordinator/daily-pdf', `daily-attendance-${date}.pdf`, { date }),
   downloadWeeklyAttendancePdf: (upto: string) =>
     downloadFile('/faculty/attendance/coordinator/weekly-pdf', `weekly-attendance-${upto}.pdf`, { upto }),
+  attendanceProxies: (date: string) =>
+    api.get<T.ProxyLectures>('/faculty/attendance/coordinator/proxies', { params: { date } }).then((r) => r.data),
+  assignProxyLecture: (slotId: string, date: string, proxyFacultyId: string) =>
+    api.post('/faculty/attendance/coordinator/proxies', { slotId, date, proxyFacultyId }).then((r) => r.data),
+  removeProxyLecture: (slotId: string, date: string) =>
+    api.delete('/faculty/attendance/coordinator/proxies', { params: { slotId, date } }).then((r) => r.data),
   attendanceSummary: () => api.get<{
     semesterLabel: string
     bySubjectAndBatch: { subjectCode: string; batchCode: string; totalStudents: number; avgAttendancePct: number; belowThresholdCount: number; totalLecturesMarked: number }[]

@@ -5645,6 +5645,120 @@ export const portalService = {
     });
   },
 
+  // Today's lectures for THIS faculty across every batch, straight from the
+  // timetable — no batch/date picker. Proxies reroute ownership for the day: a
+  // lecture proxied away drops off this list, a lecture proxied in appears.
+  async facultyTodayLectures(facultyId: string, universityId: string) {
+    const day = attnDate(new Date().toISOString().slice(0, 10));
+    const dateStr = day.toISOString().slice(0, 10);
+    const dayOfWeek = day.getUTCDay();
+    const slotInclude = { subject: { select: { code: true, name: true } }, batch: { select: { code: true } } };
+
+    const ownSlots = await prisma.timetableSlot.findMany({
+      where: { facultyId, dayOfWeek, semester: { universityId, status: "ACTIVE" } },
+      include: slotInclude, orderBy: { slotStart: "asc" },
+    });
+    const proxiesOnOwn = ownSlots.length
+      ? await prisma.proxyLecture.findMany({ where: { lectureDate: day, slotId: { in: ownSlots.map((s) => s.id) } } })
+      : [];
+    const reassignedAway = new Set(proxiesOnOwn.filter((p) => p.proxyFacultyId !== facultyId).map((p) => p.slotId));
+    const proxyIn = await prisma.proxyLecture.findMany({ where: { lectureDate: day, proxyFacultyId: facultyId } });
+    const proxyInIds = proxyIn.map((p) => p.slotId).filter((id) => !ownSlots.some((s) => s.id === id));
+    const inSlots = proxyInIds.length
+      ? await prisma.timetableSlot.findMany({ where: { id: { in: proxyInIds } }, include: slotInclude })
+      : [];
+
+    const chosen = [
+      ...ownSlots.filter((s) => !reassignedAway.has(s.id)).map((slot) => ({ slot, isProxy: false })),
+      ...inSlots.map((slot) => ({ slot, isProxy: true })),
+    ].sort((a, b) => a.slot.slotStart.localeCompare(b.slot.slotStart));
+
+    const dayStatus = await resolveDayStatus(universityId, dateStr);
+    const lectures = [];
+    for (const { slot, isProxy } of chosen) {
+      const enrollments = await prisma.studentEnrollment.findMany({
+        where: { batchId: slot.batchId, semesterId: slot.semesterId, isCurrent: true },
+        include: { student: { select: { name: true, enrollmentNo: true } } }, orderBy: { rollNo: "asc" },
+      });
+      const enrIds = enrollments.map((e) => e.id);
+      const existing = enrIds.length
+        ? await prisma.attendanceRecord.findMany({ where: { enrollmentId: { in: enrIds }, lectureDate: day, slotId: slot.id } })
+        : [];
+      const marks: Record<string, boolean> = {};
+      for (const r of existing) marks[r.enrollmentId] = r.isPresent;
+      lectures.push({
+        slotId: slot.id, batchId: slot.batchId, batchCode: slot.batch.code,
+        subjectId: slot.subjectId, subjectCode: slot.subject.code, subjectName: slot.subject.name,
+        slotStart: slot.slotStart, slotEnd: slot.slotEnd, room: slot.room, isProxy,
+        students: enrollments.map((e) => ({ enrollmentId: e.id, rollNo: e.rollNo, name: e.student.name, enrollmentNo: e.student.enrollmentNo })),
+        marks,
+      });
+    }
+    return { date: dateStr, dayOfWeek, isEditable: dayStatus.isWorkingDay, dayStatus, lectures };
+  },
+
+  // ── Coordinator: proxy lecture management ──
+  async attendanceCoordinatorProxies(facultyId: string, universityId: string, dateStr: string) {
+    const sem = await facultyActiveSemester(facultyId, universityId);
+    await assertAttendanceCoordinator(facultyId, sem.id, sem.label);
+    const day = attnDate(dateStr);
+    const dayOfWeek = day.getUTCDay();
+    const slots = await prisma.timetableSlot.findMany({
+      where: { semesterId: sem.id, dayOfWeek },
+      include: { subject: { select: { code: true } }, batch: { select: { code: true } } },
+      orderBy: [{ batch: { code: "asc" } }, { slotStart: "asc" }],
+    });
+    const proxies = slots.length ? await prisma.proxyLecture.findMany({ where: { lectureDate: day, slotId: { in: slots.map((s) => s.id) } } }) : [];
+    const proxyBySlot = new Map(proxies.map((p) => [p.slotId, p]));
+    const facIds = [...new Set([...slots.map((s) => s.facultyId).filter(Boolean) as string[], ...proxies.map((p) => p.proxyFacultyId)])];
+    const facs = facIds.length ? await prisma.faculty.findMany({ where: { id: { in: facIds } }, select: { id: true, name: true, employeeId: true } }) : [];
+    const facById = new Map(facs.map((f) => [f.id, `${f.name} (${f.employeeId})`]));
+    const options = await prisma.faculty.findMany({ where: { universityId, isHod: false, isDean: false, isActive: true, deletedAt: null }, select: { id: true, name: true, employeeId: true }, orderBy: { name: "asc" } });
+    return {
+      semesterId: sem.id, date: day.toISOString().slice(0, 10),
+      lectures: slots.map((s) => {
+        const p = proxyBySlot.get(s.id);
+        return {
+          slotId: s.id, batchCode: s.batch.code, subjectCode: s.subject.code, slotStart: s.slotStart, slotEnd: s.slotEnd,
+          originalFacultyId: s.facultyId, originalFaculty: s.facultyId ? facById.get(s.facultyId) ?? "—" : "—",
+          proxyFacultyId: p?.proxyFacultyId ?? null, proxyFaculty: p ? facById.get(p.proxyFacultyId) ?? null : null,
+        };
+      }),
+      facultyOptions: options,
+    };
+  },
+
+  async assignProxyLecture(facultyId: string, universityId: string, slotId: string, dateStr: string, proxyFacultyId: string) {
+    const sem = await facultyActiveSemester(facultyId, universityId);
+    await assertAttendanceCoordinator(facultyId, sem.id, sem.label);
+    const day = attnDate(dateStr);
+    const slot = await prisma.timetableSlot.findFirst({ where: { id: slotId, semesterId: sem.id } });
+    if (!slot) throw new ApiError(404, "SLOT_NOT_FOUND", "Lecture not found in this semester.");
+    const proxy = await prisma.faculty.findFirst({ where: { id: proxyFacultyId, universityId, isHod: false, deletedAt: null } });
+    if (!proxy) throw new ApiError(404, "FACULTY_NOT_FOUND", "Proxy faculty not found.");
+    // Choosing the original owner clears the proxy instead of creating a no-op.
+    if (slot.facultyId && slot.facultyId === proxyFacultyId) {
+      await prisma.proxyLecture.deleteMany({ where: { slotId, lectureDate: day } });
+      return { slotId, proxyFacultyId: null };
+    }
+    await prisma.proxyLecture.upsert({
+      where: { slotId_lectureDate: { slotId, lectureDate: day } },
+      update: { proxyFacultyId, assignedById: facultyId },
+      create: { universityId, semesterId: sem.id, slotId, lectureDate: day, originalFacultyId: slot.facultyId ?? proxyFacultyId, proxyFacultyId, assignedById: facultyId },
+    });
+    await this.notifyMany(universityId, [{ facultyId: proxyFacultyId }], "PROXY_LECTURE_ASSIGNED",
+      "Proxy lecture assigned", `You were assigned a proxy lecture on ${day.toISOString().slice(0, 10)}. Check Attendance.`, "/faculty/attendance");
+    return { slotId, proxyFacultyId };
+  },
+
+  async removeProxyLecture(facultyId: string, universityId: string, slotId: string, dateStr: string) {
+    const sem = await facultyActiveSemester(facultyId, universityId);
+    await assertAttendanceCoordinator(facultyId, sem.id, sem.label);
+    const day = attnDate(dateStr);
+    await prisma.proxyLecture.deleteMany({ where: { slotId, lectureDate: day, semesterId: sem.id } });
+    return { removed: true };
+  },
+
   async facultyExamStatus(facultyId: string, universityId: string) {
     // ponytail: resolve THIS faculty's active semester (multi-active-sem era).
     const sem = await facultyActiveSemester(facultyId, universityId);
