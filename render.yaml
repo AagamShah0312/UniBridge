@@ -28,10 +28,11 @@ services:
         sync: false
       - key: S3_SECRET_ACCESS_KEY
         sync: false
-      # Origin ONLY — the bridge appends /api/v1/student-ai/ itself.
-      # Paste the AI service's URL after its first deploy.
+      # Origin ONLY (no trailing path) — the bridge appends /api/v1/student-ai/ itself.
+      # Without this, studentAiBridge.isConfigured() is false in production and every
+      # quiz/AI call 503s. Pinned to the unibridge-ai service below so it can't go missing.
       - key: DJANGO_AI_BASE_URL
-        sync: false
+        value: https://unibridge-ai.onrender.com
       - key: DJANGO_AI_SERVICE_TOKEN
         sync: false
 
