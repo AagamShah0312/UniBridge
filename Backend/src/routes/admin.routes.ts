@@ -69,12 +69,6 @@ adminRouter.get("/branches", asyncHandler(async (req, res) => res.json(await por
 adminRouter.post("/branches", asyncHandler(async (req, res) => res.status(201).json(await portalService.addUniversityBranch(req.user!.universityId, String(req.body.code).trim().toUpperCase(), String(req.body.name)))));
 adminRouter.delete("/branches/:id", asyncHandler(async (req, res) => res.json(await portalService.uniDeleteBranch(req.user!.universityId, str(req.params.id)))));
 
-// Archive — university-wide permanent academic record (every year, semester and batch).
-adminRouter.get("/archive", asyncHandler(async (req, res) => res.json(await portalService.archiveTree(req.user!.universityId))));
-adminRouter.get("/archive/:semesterId/:batchId", asyncHandler(async (req, res) => res.json(
-  await portalService.archiveBatchSnapshot(req.user!.universityId, str(req.params.semesterId), str(req.params.batchId)),
-)));
-
 // Settings
 adminRouter.get("/settings", asyncHandler(async (req, res) => res.json(await portalService.uniSettings(req.user!.universityId))));
 adminRouter.put("/settings", asyncHandler(async (req, res) => res.json(await portalService.uniUpdateSettings(req.user!.universityId, req.body))));

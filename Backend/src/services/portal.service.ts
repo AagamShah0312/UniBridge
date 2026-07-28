@@ -19,19 +19,6 @@ type Scope = {
   userId: string;
 };
 
-// ── Calendar visibility tiers ────────────────────────────────
-// One shared event store, read through a role-scoped filter so all three portals stay in sync:
-//   ALL         → HOD + Faculty + Students (holidays, breaks, exams — the student-facing calendar)
-//   FACULTY_HOD → HOD + Faculty only (internal planning)
-//   HOD_ONLY    → HOD only
-// `audience` is a required arg on calendarEvents() so no caller can silently over-share.
-export type CalendarAudience = "STUDENT" | "FACULTY" | "HOD";
-const VISIBLE_TO: Record<CalendarAudience, ("ALL" | "FACULTY_HOD" | "HOD_ONLY")[]> = {
-  STUDENT: ["ALL"],
-  FACULTY: ["ALL", "FACULTY_HOD"],
-  HOD: ["ALL", "FACULTY_HOD", "HOD_ONLY"],
-};
-
 function planTaskTone(priority: string) {
   if (priority === "high") return "HIGH";
   if (priority === "low") return "LOW";
@@ -79,11 +66,6 @@ async function bestEffortStudentAi(action: () => Promise<unknown>) {
     // Best-effort background trigger: note/PYQ uploads should still succeed even if Django is offline.
   }
 }
-
-// Avoid queuing the same note repeatedly while the student modal polls for
-// completed chapters. This is intentionally short-lived; a later request can
-// retry a failed or stalled AI job.
-const quizChapterTriggers = new Map<string, number>();
 
 // ─────────────────────────────────────────────────────────────
 // Pure utility helpers (no DB calls)
@@ -617,44 +599,6 @@ async function ensureStudentSubject(studentId: string, universityId: string, sub
   }
 }
 
-type QuizNote = { id: string; title: string; fileKey: string; folder: { name: string } | null };
-
-/** One selectable entry per faculty note, labelled "<folder> / <title>" so the
- *  T-1…T-4 folders faculty upload into stay visible in the quiz picker. */
-function quizNoteLabel(note: QuizNote) {
-  const folder = note.folder?.name.trim() ?? "";
-  const title = note.title.trim();
-  return folder ? `${folder} / ${title}` : title;
-}
-
-/** The notes a student may build a quiz from. Resolved here rather than in the
- *  Django service because publication status and batch targeting — the rules that
- *  decide what a student is allowed to see — only exist in Prisma. */
-async function studentQuizNotes(studentId: string, universityId: string, subjectId: string): Promise<QuizNote[]> {
-  const { enrollment } = await getStudentEnrollment(studentId, universityId);
-  return prisma.note.findMany({
-    where: { universityId, subjectId, deletedAt: null, status: "PUBLISHED", targets: { some: { batchId: enrollment.batchId } } },
-    select: { id: true, title: true, fileKey: true, folder: { select: { name: true } } },
-    orderBy: [{ folder: { name: "asc" } }, { title: "asc" }],
-    take: 100,
-  });
-}
-
-/** Warm AI extraction for notes that have never been processed, so generation is
- *  fast later. Throttled per note; failures are ignored because generation falls
- *  back to extracting on demand. */
-function warmQuizNotes(notes: QuizNote[]) {
-  const now = Date.now();
-  for (const note of notes) {
-    if (now - (quizChapterTriggers.get(note.id) ?? 0) < 30_000) continue;
-    quizChapterTriggers.set(note.id, now);
-    void bestEffortStudentAi(() => studentAiBridge.triggerNoteProcessing(
-      note.id,
-      storageEnabled ? presignGetUrl(note.fileKey, 60 * 60) : undefined,
-    ));
-  }
-}
-
 async function getStudentMentorAssignment(studentId: string, universityId: string, semesterId?: string) {
   const { semester } = await getStudentEnrollment(studentId, universityId, semesterId);
   return getMentorAssignment(studentId, semester.id);
@@ -1033,104 +977,6 @@ export const portalService = {
     return { data: rows };
   },
 
-  // ── ARCHIVE ────────────────────────────────────────────────
-  // Permanent academic record, grouped academic-year → semester → batch. A HOD sees ONLY batches
-  // they have ever owned (released ownership included); the Dean sees the whole university.
-  // Nothing here depends on a record being "current", so a 2015 transcript resolves the same way
-  // a live one does.
-  async archiveTree(universityId: string, opts: { facultyId?: string } = {}) {
-    const batchIds = opts.facultyId ? await hodAllBatchIds(opts.facultyId) : null;
-    if (batchIds && batchIds.length === 0) return { scope: "HOD", years: [] };
-
-    const enrollments = await prisma.studentEnrollment.findMany({
-      where: { ...(batchIds ? { batchId: { in: batchIds } } : { batch: { universityId } }) },
-      select: {
-        id: true, batchId: true,
-        batch: { select: { id: true, code: true, yearLevel: true } },
-        semester: { select: { id: true, label: true, number: true, status: true, academicYear: { select: { id: true, label: true } } } },
-      },
-    });
-
-    // year → semester → batch, counting students at each leaf.
-    type Leaf = { batchId: string; batchCode: string; yearLevel: string; students: number };
-    const years = new Map<string, { id: string; label: string; semesters: Map<string, { id: string; label: string; number: number; status: string; batches: Map<string, Leaf> }> }>();
-    for (const e of enrollments) {
-      const ay = e.semester.academicYear;
-      const y = years.get(ay.id) ?? { id: ay.id, label: ay.label, semesters: new Map() };
-      const s = y.semesters.get(e.semester.id) ?? { id: e.semester.id, label: e.semester.label, number: e.semester.number, status: e.semester.status, batches: new Map() };
-      const b = s.batches.get(e.batchId) ?? { batchId: e.batchId, batchCode: e.batch.code, yearLevel: e.batch.yearLevel, students: 0 };
-      b.students += 1;
-      s.batches.set(e.batchId, b);
-      y.semesters.set(e.semester.id, s);
-      years.set(ay.id, y);
-    }
-
-    return {
-      scope: opts.facultyId ? "HOD" : "UNIVERSITY",
-      years: [...years.values()]
-        .sort((a, b) => b.label.localeCompare(a.label))
-        .map((y) => ({
-          academicYearId: y.id,
-          academicYear: y.label,
-          totalStudents: [...y.semesters.values()].reduce((n, s) => n + [...s.batches.values()].reduce((m, b) => m + b.students, 0), 0),
-          semesters: [...y.semesters.values()]
-            .sort((a, b) => a.number - b.number)
-            .map((s) => ({
-              semesterId: s.id, label: s.label, number: s.number, isActive: s.status === "ACTIVE",
-              batches: [...s.batches.values()].sort((a, b) => a.batchCode.localeCompare(b.batchCode)),
-              totalStudents: [...s.batches.values()].reduce((m, b) => m + b.students, 0),
-            })),
-        })),
-    };
-  },
-
-  // Frozen snapshot of one (semester, batch): every student with their marks and attendance as
-  // recorded at the time. This is the view a registrar opens years later.
-  async archiveBatchSnapshot(universityId: string, semesterId: string, batchId: string, opts: { facultyId?: string } = {}) {
-    if (opts.facultyId) {
-      const owned = await hodAllBatchIds(opts.facultyId);
-      if (!owned.includes(batchId)) throw new ApiError(403, "FORBIDDEN", "This batch is outside your ownership history.");
-    }
-    const batch = await prisma.batch.findFirst({ where: { id: batchId, universityId }, select: { id: true, code: true, yearLevel: true } });
-    if (!batch) throw new ApiError(404, "NOT_FOUND", "Batch not found.");
-    const semester = await prisma.semester.findFirst({ where: { id: semesterId, universityId }, select: { id: true, label: true, number: true, academicYear: { select: { label: true } } } });
-    if (!semester) throw new ApiError(404, "NOT_FOUND", "Semester not found.");
-
-    const enrollments = await prisma.studentEnrollment.findMany({
-      where: { batchId, semesterId },
-      include: {
-        student: { select: { id: true, enrollmentNo: true, name: true, email: true, branch: true, admissionYear: true, graduationStatus: true, graduatedAt: true } },
-        results: { include: { phase: { select: { label: true, number: true } }, subject: { select: { code: true } } } },
-      },
-      orderBy: { rollNo: "asc" },
-    });
-
-    const rows = await Promise.all(enrollments.map(async (e) => {
-      const [total, present] = await Promise.all([
-        prisma.attendanceRecord.count({ where: { enrollmentId: e.id } }),
-        prisma.attendanceRecord.count({ where: { enrollmentId: e.id, isPresent: true } }),
-      ]);
-      return {
-        enrollmentNo: e.student.enrollmentNo, name: e.student.name, email: e.student.email,
-        branch: e.student.branch, admissionYear: e.student.admissionYear,
-        graduationStatus: e.student.graduationStatus, graduatedAt: e.student.graduatedAt,
-        rollNo: e.rollNo,
-        attendancePct: total ? Math.round((present / total) * 1000) / 10 : null,
-        lecturesHeld: total, lecturesAttended: present,
-        results: e.results
-          .sort((a, b) => a.phase.number - b.phase.number || a.subject.code.localeCompare(b.subject.code))
-          .map((r) => ({ phase: r.phase.label, subject: r.subject.code, marksObtained: r.marksObtained, maxMarks: r.maxMarks, grade: r.grade })),
-      };
-    }));
-
-    return {
-      batch: { id: batch.id, code: batch.code, yearLevel: batch.yearLevel },
-      semester: { id: semester.id, label: semester.label, number: semester.number, academicYear: semester.academicYear.label },
-      studentCount: rows.length,
-      students: rows,
-    };
-  },
-
   // The semesters THIS HOD has data for — every semester that has enrollments in a batch the HOD
   // has ever owned. Powers the sidebar "Semester History" selector. The active one is `isCurrent`.
   async hodHistorySemesters(scope: Scope) {
@@ -1163,42 +1009,44 @@ export const portalService = {
     };
   },
 
-  // Reset — hand the HOD a clean slate for re-onboarding WITHOUT destroying a single academic
-  // record. A transcript requested 10 years from now must still resolve, so this only clears
-  // *operational* wiring (timetable, faculty-subject assignments, batch audience targets) and
-  // RELEASES batch ownership. Students, enrollments, results, attendance and the batches
-  // themselves are retained permanently and stay reachable through the archive views.
-  //
-  // ponytail: previously this hard-deleted results/attendance/enrollments/students/batches.
-  // Releasing scope is enough to make `needsOnboarding` true again (myScope derives batches from
-  // unreleased scope), so the wizard still reappears — with zero data loss.
+  // Reset — wipe THIS HOD's batches + students + timetable + assignments for their owned batches,
+  // atomically, so the semester onboarding wizard reappears. Students exclusive to this HOD are
+  // hard-deleted (no orphans); students shared with other batches keep their other enrollments.
   async hodResetSemester(scope: Scope) {
     const batchIds = scope.hodBatchIds;
-    if (!batchIds.length) return { batchesReleased: 0, studentsPreserved: 0, message: "Nothing to reset — no batches owned." };
+    if (!batchIds.length) return { batchesRemoved: 0, studentsRemoved: 0, message: "Nothing to reset — no batches owned." };
     const enrollments = await prisma.studentEnrollment.findMany({ where: { batchId: { in: batchIds } }, select: { id: true, studentId: true } });
     const enrollmentIds = enrollments.map((e) => e.id);
     const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
-    const [resultsKept, attendanceKept] = await Promise.all([
-      prisma.result.count({ where: { enrollmentId: { in: enrollmentIds } } }),
-      prisma.attendanceRecord.count({ where: { enrollmentId: { in: enrollmentIds } } }),
-    ]);
+    // students whose ONLY enrollments are in these batches → safe to remove entirely
+    const orphanIds: string[] = [];
+    for (const sid of studentIds) {
+      const other = await prisma.studentEnrollment.count({ where: { studentId: sid, batchId: { notIn: batchIds } } });
+      if (other === 0) orphanIds.push(sid);
+    }
     await prisma.$transaction([
-      // Operational wiring only — safe to rebuild during onboarding.
+      prisma.attendanceRecord.deleteMany({ where: { enrollmentId: { in: enrollmentIds } } }),
+      prisma.result.deleteMany({ where: { enrollmentId: { in: enrollmentIds } } }),
+      prisma.mentorAssignment.deleteMany({ where: { studentId: { in: studentIds } } }),
+      prisma.studentEnrollment.deleteMany({ where: { id: { in: enrollmentIds } } }),
       prisma.facultyBatchAssignment.deleteMany({ where: { batchId: { in: batchIds } } }),
       prisma.timetableSlot.deleteMany({ where: { batchId: { in: batchIds } } }),
+      // ponytail: batch-audience targets (notes/quizzes) FK to batch with no cascade — clear them
+      // before the batch delete or Postgres raises a foreign-key violation.
       prisma.noteBatchTarget.deleteMany({ where: { batchId: { in: batchIds } } }),
       prisma.quizBatchTarget.deleteMany({ where: { batchId: { in: batchIds } } }),
-      // Release ownership; the row survives as the permanent HOD↔batch archive link.
-      prisma.hodBatchScope.updateMany({ where: { batchId: { in: batchIds } }, data: { releasedAt: new Date() } }),
+      prisma.hodBatchScope.deleteMany({ where: { batchId: { in: batchIds } } }),
+      // clear orphan students' dependent rows, then the students themselves
+      prisma.quizAttempt.deleteMany({ where: { studentId: { in: orphanIds } } }),
+      prisma.selfNote.deleteMany({ where: { studentId: { in: orphanIds } } }),
+      prisma.announcementRead.deleteMany({ where: { studentId: { in: orphanIds } } }),
+      prisma.notification.deleteMany({ where: { studentId: { in: orphanIds } } }),
+      prisma.aIConversation.deleteMany({ where: { studentId: { in: orphanIds } } }),
+      prisma.refreshToken.deleteMany({ where: { studentId: { in: orphanIds } } }),
+      prisma.student.deleteMany({ where: { id: { in: orphanIds } } }),
+      prisma.batch.deleteMany({ where: { id: { in: batchIds } } }),
     ]);
-    return {
-      batchesReleased: batchIds.length,
-      studentsPreserved: studentIds.length,
-      enrollmentsPreserved: enrollmentIds.length,
-      resultsPreserved: resultsKept,
-      attendancePreserved: attendanceKept,
-      message: "Batches released for re-onboarding. All student records, results and attendance were preserved and remain available in the archive.",
-    };
+    return { batchesRemoved: batchIds.length, studentsRemoved: orphanIds.length };
   },
 
   // Graduation: mark the HOD's current final-semester students PASS_OUT. Never deletes/archives —
@@ -2822,8 +2670,8 @@ export const portalService = {
 
   // ── Calendar Events ───────────────────────────────────────
 
-  async calendarEvents(universityId: string, query: Record<string, string | number | undefined>, audience: CalendarAudience) {
-    const where: any = { universityId, deletedAt: null, visibleTo: { in: VISIBLE_TO[audience] } };
+  async calendarEvents(universityId: string, query: Record<string, string | number | undefined>) {
+    const where: any = { universityId };
     if (query.year && query.month) {
       const y = Number(query.year); const m = Number(query.month);
       const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0);
@@ -2834,16 +2682,16 @@ export const portalService = {
       where.endDate = { lte: new Date(String(query.endDate)) };
     }
     const rows = await prisma.calendarEvent.findMany({ where, orderBy: { startDate: "asc" } });
-    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, visibleTo: e.visibleTo, description: e.description })) };
+    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, description: e.description })) };
   },
 
-  async upcomingEvents(universityId: string, limit = 6, audience: CalendarAudience = "STUDENT") {
+  async upcomingEvents(universityId: string, limit = 6) {
     const rows = await prisma.calendarEvent.findMany({
-      where: { universityId, startDate: { gte: new Date() }, deletedAt: null, visibleTo: { in: VISIBLE_TO[audience] } },
+      where: { universityId, startDate: { gte: new Date() }, deletedAt: null },
       orderBy: { startDate: "asc" },
       take: limit,
     });
-    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, visibleTo: e.visibleTo, description: e.description })) };
+    return { data: rows.map((e) => ({ id: e.id, date: e.startDate, startDate: e.startDate, endDate: e.endDate, title: e.title, type: e.eventType, description: e.description })) };
   },
 
   async getEvent(eventId: string) {
@@ -2880,8 +2728,8 @@ export const portalService = {
   },
 
   // Real calendar listing (this used to return an empty stub PDF).
-  async calendarExport(universityId: string, query: Record<string, string | number | undefined> = {}, audience: CalendarAudience = "HOD"): Promise<ExportTable> {
-    const { data } = await this.calendarEvents(universityId, query, audience);
+  async calendarExport(universityId: string, query: Record<string, string | number | undefined> = {}): Promise<ExportTable> {
+    const { data } = await this.calendarEvents(universityId, query);
     const fmt = (d: Date | string) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     return {
       title: "Academic Calendar",
@@ -3044,8 +2892,7 @@ export const portalService = {
     const ids = enrollments.map((e) => e.id);
     const lockedCount = await prisma.attendanceRecord.count({ where: { enrollmentId: { in: ids }, isLocked: true } });
     if (lockedCount > 0) return { deletedCount: 0, blocked: true, reason: `${lockedCount} records are locked. Unlock before deleting.` };
-    // Soft delete — the rows stay for audit/transcripts; live reads filter deletedAt: null.
-    const { count } = await prisma.attendanceRecord.updateMany({ where: { enrollmentId: { in: ids }, deletedAt: null }, data: { deletedAt: new Date() } });
+    const { count } = await prisma.attendanceRecord.deleteMany({ where: { enrollmentId: { in: ids } } });
     return { deletedCount: count, blocked: false };
   },
 
@@ -3514,7 +3361,6 @@ export const portalService = {
     const results = questions.map((q) => ({ questionId: q.id, questionText: q.text, options: q.options, selectedOption: answers[q.id], correctOption: q.correctOption, isCorrect: answers[q.id] === q.correctOption, explanation: q.explanation }));
     const correctCount = results.filter((r) => r.isCorrect).length;
     const score = questions.length === 0 ? 0 : Number(((correctCount / questions.length) * 100).toFixed(1));
-    // Each submission is a new attempt row — earlier attempts are never overwritten.
     const attempt = await prisma.quizAttempt.create({ data: { studentId, quizId, score, answers, attemptNumber: attemptsTaken + 1, presentation: presentation as Prisma.InputJsonValue } });
     return { quizId, attemptId: attempt.id, score, correctCount, incorrectCount: questions.length - correctCount, totalQuestions: questions.length, submittedAt: attempt.submittedAt, attemptsTaken: attemptsTaken + 1, maxAttempts: quiz.maxAttempts, results };
   },
@@ -3555,39 +3401,19 @@ export const portalService = {
 
   async studentQuizChapters(studentId: string, universityId: string, subjectId: string) {
     await ensureStudentSubject(studentId, universityId, subjectId);
-    // Listed straight from the faculty notes, not from Django's processed chunks:
-    // a note that has never been ingested is still selectable, and generation
-    // extracts it on demand. That keeps the picker populated instead of showing
-    // "no processed notes" whenever ingestion has not run yet.
-    const notes = await studentQuizNotes(studentId, universityId, subjectId);
-    if (!notes.length) {
-      return { chapters: [], processing: false, noteCount: 0, message: "No published faculty notes exist for this subject yet." };
-    }
-    warmQuizNotes(notes);
-    return { chapters: notes.map(quizNoteLabel), processing: false, noteCount: notes.length };
+    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
+    const data = await studentAiBridge.getQuizChapters(subjectId);
+    return data ?? { chapters: [] };
   },
 
   async createStudentAiQuiz(studentId: string, universityId: string, body: { subjectId?: string; chapters?: string[]; questionCount?: number }) {
     if (!body.subjectId) throw new ApiError(400, "SUBJECT_REQUIRED", "Choose a subject.");
     await ensureStudentSubject(studentId, universityId, body.subjectId);
     const { semester } = await getStudentEnrollment(studentId, universityId);
-    const requested = [...new Set((body.chapters ?? []).map((chapter) => String(chapter).trim()).filter(Boolean))];
-    if (!requested.length) throw new ApiError(400, "CHAPTER_REQUIRED", "Choose at least one chapter.");
-    // Resolve the picked labels against the notes this student is allowed to see,
-    // then generate from those note ids. Django cannot make this call — it mirrors
-    // neither publication status nor batch targeting.
-    const wanted = new Set(requested.map((chapter) => chapter.toLowerCase()));
-    const picked = (await studentQuizNotes(studentId, universityId, body.subjectId)).filter((note) => wanted.has(quizNoteLabel(note).toLowerCase()));
-    if (!picked.length) throw new ApiError(404, "NOTE_NOT_FOUND", "The selected faculty notes are no longer available.");
-    const chapters = picked.map(quizNoteLabel);
-    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is not configured. Set DJANGO_AI_BASE_URL and DJANGO_AI_SERVICE_TOKEN on the API deployment.");
-    // Django extracts any not-yet-ingested note on demand, but the stored file_url is a
-    // raw S3 path it cannot GET (403). Hand it a short-lived presigned URL per note so the
-    // fetch succeeds — same mechanism the upload path uses for triggerNoteProcessing.
-    const noteUrls = storageEnabled
-      ? Object.fromEntries(picked.map((note) => [note.id, presignGetUrl(note.fileKey, 60 * 60)]))
-      : {};
-    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, noteIds: picked.map((note) => note.id), noteUrls, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
+    const chapters = [...new Set((body.chapters ?? []).map((chapter) => String(chapter).trim()).filter(Boolean))];
+    if (!chapters.length) throw new ApiError(400, "CHAPTER_REQUIRED", "Choose at least one chapter.");
+    if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
+    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
     if (!generated?.questions?.length) throw new ApiError(422, "QUIZ_GENERATION_FAILED", "No questions could be generated from the selected notes.");
     const subject = await subjectById(body.subjectId);
     const quiz = await prisma.quiz.create({ data: { studentId, subjectId: body.subjectId, semesterId: semester.id, title: `${subject.code} AI practice quiz`, description: `Generated from: ${chapters.join(", ")}`, isAiGenerated: true, isPublished: true, maxAttempts: 3, chapterNames: chapters, questions: { create: generated.questions.map((question, index) => ({ text: question.text, options: question.options.map((text, optionIndex) => ({ id: String.fromCharCode(65 + optionIndex), text })), correctOption: String.fromCharCode(65 + question.correct_index), explanation: question.explanation || null, order: index })) } }, include: { _count: { select: { questions: true } } } });
@@ -4366,10 +4192,9 @@ export const portalService = {
     await ensureFacultyAssignedBatch(facultyId, universityId, batchId);
     await ensureFacultyAssignedSubject(facultyId, universityId, subjectId);
     const lectureDate = new Date(date);
-    const rows = await prisma.attendanceRecord.findMany({ where: { subjectId, enrollment: { batchId }, lectureDate, deletedAt: null } });
+    const rows = await prisma.attendanceRecord.findMany({ where: { subjectId, enrollment: { batchId }, lectureDate } });
     if (rows.some((r) => r.isLocked)) throw new ApiError(403, "ATTENDANCE_RECORD_LOCKED", "Attendance record is locked.");
-    // Soft delete — a mistaken lecture entry is retracted, not erased.
-    const { count } = await prisma.attendanceRecord.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { deletedAt: new Date() } });
+    const { count } = await prisma.attendanceRecord.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
     return { deletedCount: count, lectureDate: date };
   },
 
@@ -5031,11 +4856,11 @@ export const portalService = {
   // ── Faculty — Calendar / Analytics ───────────────────────
 
   async facultyCalendarEvents(universityId: string, year: number, month: number) {
-    return this.calendarEvents(universityId, { year, month }, "FACULTY");
+    return this.calendarEvents(universityId, { year, month });
   },
 
   async facultyUpcomingEvents(universityId: string, limit = 6) {
-    return this.upcomingEvents(universityId, limit, "FACULTY");
+    return this.upcomingEvents(universityId, limit);
   },
 
   async facultyAnalyticsAttendance(facultyId: string, universityId: string, semesterId?: string, subjectId?: string, batchId?: string) {
@@ -5463,10 +5288,8 @@ export const portalService = {
     return { id: updated.id, marksObtained: updated.marksObtained, grade: updated.grade, updatedAt: updated.updatedAt };
   },
 
-  // Soft delete — a retracted mark stays on record (grade history is the one thing a student
-  // may need to contest years later); every live read filters deletedAt: null.
   async deleteResult(resultId: string) {
-    await prisma.result.update({ where: { id: resultId }, data: { deletedAt: new Date() } });
+    await prisma.result.delete({ where: { id: resultId } });
   },
 
   async studentStudyPlanner(studentId: string, _universityId: string) {
@@ -6066,7 +5889,7 @@ export const portalService = {
       select: { id: true, name: true, year: true, employeeId: true },
     });
     const rows = await Promise.all(hods.map(async (hod) => {
-      const scopes = await prisma.hodBatchScope.findMany({ where: { facultyId: hod.id, releasedAt: null }, select: { batchId: true } });
+      const scopes = await prisma.hodBatchScope.findMany({ where: { facultyId: hod.id }, select: { batchId: true } });
       const batchIds = scopes.map((s) => s.batchId);
       // the HOD's active semester = the ACTIVE semester at their year level
       const activeSem = hod.year
@@ -6150,11 +5973,10 @@ export const portalService = {
     if (!hod) throw new ApiError(404, "HOD_NOT_FOUND", "Faculty is not a HOD.");
     const batch = await batchById(batchId);
     if (batch.universityId !== universityId) throw new ApiError(400, "INVALID_BATCH", "Batch does not belong to this university.");
-    // batchId is @unique on HodBatchScope — one owner per batch.
-    // Re-assigning revives a previously released row (releasedAt back to null).
+    // batchId is @unique on HodBatchScope — one owner per batch
     await prisma.hodBatchScope.upsert({
       where: { batchId },
-      update: { facultyId, semesterId: activeSem.id, academicYearId: batch.academicYearId, releasedAt: null },
+      update: { facultyId, semesterId: activeSem.id, academicYearId: batch.academicYearId },
       create: { facultyId, batchId, semesterId: activeSem.id, academicYearId: batch.academicYearId },
     });
     return { batchId, facultyId, batchCode: batch.code };
@@ -6164,8 +5986,7 @@ export const portalService = {
     // Ownership: never let a Dean drop a scope for a batch in another university.
     const batch = await batchById(batchId);
     if (batch.universityId !== universityId) throw new ApiError(400, "INVALID_BATCH", "Batch does not belong to this university.");
-    // Release rather than delete — the HOD↔batch link stays queryable in the archive forever.
-    await prisma.hodBatchScope.updateMany({ where: { batchId, releasedAt: null }, data: { releasedAt: new Date() } });
+    await prisma.hodBatchScope.deleteMany({ where: { batchId } });
     return { removed: true };
   },
 
@@ -6215,7 +6036,7 @@ export const portalService = {
     const f = await prisma.faculty.findFirst({ where: { id: facultyId, universityId } });
     if (!f) throw new ApiError(404, "NOT_FOUND", "Faculty not found.");
     if (f.isDean) throw new ApiError(403, "CANNOT_DELETE_DEAN", "Cannot delete the Dean.");
-    const scopes = await prisma.hodBatchScope.count({ where: { facultyId, releasedAt: null } });
+    const scopes = await prisma.hodBatchScope.count({ where: { facultyId } });
     if (scopes > 0) throw new ApiError(409, "HAS_SCOPES", "Remove this HOD's batch assignments first.");
     await prisma.faculty.update({ where: { id: facultyId }, data: { deletedAt: new Date() } });
     return { deleted: true };
@@ -6541,7 +6362,7 @@ export const portalService = {
     const myBatchIds = [...new Set(myAsg.map((a) => a.batchId))];
     // 2. Whoever HODs those batches → those are this faculty's HODs.
     const hodScopes = myBatchIds.length
-      ? await prisma.hodBatchScope.findMany({ where: { batchId: { in: myBatchIds }, releasedAt: null }, select: { facultyId: true } })
+      ? await prisma.hodBatchScope.findMany({ where: { batchId: { in: myBatchIds } }, select: { facultyId: true } })
       : [];
     const hodIds = [...new Set(hodScopes.map((s) => s.facultyId))];
     // 3. Every batch under those HODs (in the active academic year).

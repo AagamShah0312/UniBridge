@@ -235,7 +235,7 @@ studentRouter.get("/calendar/events/upcoming", asyncHandler(async (req, res) => 
 }));
 
 studentRouter.get("/calendar/events", asyncHandler(async (req, res) => {
-  res.json(await portalService.calendarEvents(req.user!.universityId, req.query as Record<string, string | number | undefined>, "STUDENT"));
+  res.json(await portalService.calendarEvents(req.user!.universityId, req.query as Record<string, string | number | undefined>));
 }));
 
 studentRouter.get("/calendar/phase-timeline", asyncHandler(async (req, res) => {
