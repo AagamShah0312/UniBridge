@@ -94,6 +94,11 @@ hodRouter.get("/exam/coordinators", asyncHandler(async (req, res) => res.json(aw
 hodRouter.post("/exam/coordinators", asyncHandler(async (req, res) => res.json(await portalService.assignExamCoordinator(scopeFrom(req), Number(req.body.slot), String(req.body.facultyId)))));
 hodRouter.delete("/exam/coordinators/:slot", asyncHandler(async (req, res) => res.json(await portalService.removeExamCoordinator(scopeFrom(req), Number(req.params.slot)))));
 hodRouter.get("/exam/context", asyncHandler(async (req, res) => res.json(await portalService.examContext(req.user!.universityId))));
+
+// ── Attendance coordinators (any number; get the coordinator PDF page) ──
+hodRouter.get("/attendance/coordinators", asyncHandler(async (req, res) => res.json(await portalService.attendanceCoordinators(scopeFrom(req)))));
+hodRouter.post("/attendance/coordinators", asyncHandler(async (req, res) => res.json(await portalService.assignAttendanceCoordinator(scopeFrom(req), String(req.body.facultyId)))));
+hodRouter.delete("/attendance/coordinators/:facultyId", asyncHandler(async (req, res) => res.json(await portalService.removeAttendanceCoordinator(scopeFrom(req), String(req.params.facultyId)))));
 hodRouter.get("/exam/assignments", asyncHandler(async (req, res) => res.json(await portalService.examAssignments(req.user!.universityId, { phaseId: req.query.phaseId as string | undefined }))));
 hodRouter.post("/exam/publish", asyncHandler(async (req, res) => res.json(await portalService.examPublish(req.user!.universityId, String(req.body.phaseId)))));
 

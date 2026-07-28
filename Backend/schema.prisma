@@ -1061,6 +1061,23 @@ model ExamCoordinator {
   @@map("exam_coordinators")
 }
 
+// Attendance-administration duty. Unlike exam coordinators (fixed 2 slots), a
+// semester can have any number of attendance coordinators — the HOD adds/removes
+// faculty freely. A coordinator gets the attendance-coordinator faculty page
+// (daily/weekly PDF generation across all batches).
+model AttendanceCoordinator {
+  id           String   @id @default(uuid()) @db.Uuid
+  universityId String   @db.Uuid
+  semesterId   String   @db.Uuid
+  facultyId    String   @db.Uuid
+  assignedById String   @db.Uuid // HOD faculty id
+  createdAt    DateTime @default(now())
+
+  @@unique([semesterId, facultyId])
+  @@index([facultyId])
+  @@map("attendance_coordinators")
+}
+
 // Paper-checking duty: coordinator assigns an enrollment-no range of one
 // batch+subject+phase to a faculty. Marks land in Result keyed the same way.
 model PaperCheckAssignment {

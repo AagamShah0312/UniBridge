@@ -1,4 +1,4 @@
-import { downloadExport, type ExportFormat } from '@/lib/download'
+import { downloadExport, downloadFile, type ExportFormat } from '@/lib/download'
 import { api } from './client'
 import type { PaginatedResponse } from '@/types/common'
 import type * as T from '@/types/faculty'
@@ -48,6 +48,14 @@ export const facultyApi = {
     api.post('/faculty/attendance/day', body).then((r) => r.data),
 
   attendancePending: () => api.get('/faculty/attendance/pending').then((r) => r.data),
+
+  // Attendance-coordinator role: gate the page, then stream the report PDFs.
+  attendanceCoordinatorStatus: () =>
+    api.get<{ isCoordinator: boolean; semesterId: string; semesterLabel: string }>('/faculty/attendance/coordinator/status').then((r) => r.data),
+  downloadDailyAttendancePdf: (date: string) =>
+    downloadFile('/faculty/attendance/coordinator/daily-pdf', `daily-attendance-${date}.pdf`, { date }),
+  downloadWeeklyAttendancePdf: (upto: string) =>
+    downloadFile('/faculty/attendance/coordinator/weekly-pdf', `weekly-attendance-${upto}.pdf`, { upto }),
   attendanceSummary: () => api.get<{
     semesterLabel: string
     bySubjectAndBatch: { subjectCode: string; batchCode: string; totalStudents: number; avgAttendancePct: number; belowThresholdCount: number; totalLecturesMarked: number }[]

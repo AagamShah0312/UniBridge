@@ -208,6 +208,23 @@ facultyRouter.get("/attendance/students-below-threshold", asyncHandler(async (re
   );
 }));
 
+// ── Attendance coordinator: status + report PDFs ──
+facultyRouter.get("/attendance/coordinator/status", asyncHandler(async (req, res) => {
+  res.json(await portalService.facultyAttendanceCoordinatorStatus(req.user!.id, req.user!.universityId));
+}));
+facultyRouter.get("/attendance/coordinator/daily-pdf", asyncHandler(async (req, res) => {
+  const pdf = await portalService.dailyAttendancePdf(req.user!.id, req.user!.universityId, String(req.query.date ?? ""));
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="daily-attendance-${String(req.query.date ?? "")}.pdf"`);
+  res.status(200).send(pdf);
+}));
+facultyRouter.get("/attendance/coordinator/weekly-pdf", asyncHandler(async (req, res) => {
+  const pdf = await portalService.weeklyAttendancePdf(req.user!.id, req.user!.universityId, String(req.query.upto ?? ""));
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="weekly-attendance-${String(req.query.upto ?? "")}.pdf"`);
+  res.status(200).send(pdf);
+}));
+
 facultyRouter.get("/notes/:noteId/ai-status", asyncHandler(async (req, res) => {
   res.json(await portalService.facultyNoteAiStatus(req.user!.id, str(req.params.noteId)));
 }));

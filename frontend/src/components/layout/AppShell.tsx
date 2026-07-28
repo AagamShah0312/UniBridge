@@ -1,11 +1,12 @@
 import { Outlet } from 'react-router-dom'
-import { Suspense, useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Loader2, FileBarChart } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { portalOf, useUser } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { hodApi } from '@/api/hod'
+import { facultyApi } from '@/api/faculty'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { MobileTabBar } from './MobileTabBar'
@@ -21,8 +22,22 @@ export default function AppShell() {
   const mobileOpen = useUiStore((s) => s.mobileSidebarOpen)
   const setMobileSidebar = useUiStore((s) => s.setMobileSidebar)
 
+  // Only attendance coordinators see the report page; keep it out of every other
+  // faculty's sidebar (the endpoints 403 non-coordinators regardless).
+  const coordStatus = useQuery({
+    queryKey: ['faculty', 'attendance-coordinator', 'status'],
+    queryFn: () => facultyApi.attendanceCoordinatorStatus(),
+    enabled: role === 'FACULTY',
+  })
+  const facultySections = useMemo(() => {
+    if (!coordStatus.data?.isCoordinator) return facultyNavItems
+    return facultyNavItems.map((s) => s.section === 'Teaching'
+      ? { ...s, items: [...s.items, { id: 'attendance-report', label: 'Attendance Report', path: '/faculty/attendance-report', icon: FileBarChart }] }
+      : s)
+  }, [coordStatus.data?.isCoordinator])
+
   const sections =
-    role === 'UNIVERSITY' ? universityNavItems : role === 'STUDENT' ? studentNavItems : role === 'HOD' ? hodNavItems : facultyNavItems
+    role === 'UNIVERSITY' ? universityNavItems : role === 'STUDENT' ? studentNavItems : role === 'HOD' ? hodNavItems : facultySections
 
   const hodScope = useQuery({ queryKey: ['hod', 'scope', 'active'], queryFn: () => hodApi.scope(), enabled: role === 'HOD' })
   // ponytail: LATCH the wizard open. myScope refetches after the Batches step and returns

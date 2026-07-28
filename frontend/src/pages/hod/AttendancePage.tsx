@@ -3,7 +3,7 @@ import { useTableSort } from '@/hooks/shared/useTableSort'
 import { ExportMenu } from '@/components/shared/ExportMenu'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { AlertTriangle, Lock, LockOpen } from 'lucide-react'
+import { AlertTriangle, Lock, LockOpen, UserPlus, X } from 'lucide-react'
 import { hodApi } from '@/api/hod'
 import { errorMessage } from '@/api/client'
 import { useHodScope } from '@/hooks/hod/useHodScope'
@@ -84,6 +84,21 @@ export default function AttendancePage() {
     onSuccess: (r: { lockedCount?: number }) => { toast.success(`Locked ${r.lockedCount ?? 0} records`); qc.invalidateQueries({ queryKey: ['hod', 'att'] }) },
     onError: (e) => toast.error(errorMessage(e)),
   })
+
+  // ── Attendance Coordinator management ──
+  const [coordPick, setCoordPick] = useState('')
+  const coordinators = useQuery({ queryKey: ['hod', 'att', 'coordinators'], queryFn: () => hodApi.attendance.coordinators(), enabled: tab === 'overview' })
+  const assignCoord = useMutation({
+    mutationFn: (facultyId: string) => hodApi.attendance.assignCoordinator(facultyId),
+    onSuccess: () => { toast.success('Coordinator added'); setCoordPick(''); qc.invalidateQueries({ queryKey: ['hod', 'att', 'coordinators'] }) },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const removeCoord = useMutation({
+    mutationFn: (facultyId: string) => hodApi.attendance.removeCoordinator(facultyId),
+    onSuccess: () => { toast.success('Coordinator removed'); qc.invalidateQueries({ queryKey: ['hod', 'att', 'coordinators'] }) },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const assignedIds = new Set((coordinators.data?.coordinators ?? []).map((c) => c.facultyId))
   const unlockOne = useMutation({
     mutationFn: (enrollmentId: string) => hodApi.attendance.unlock(enrollmentId, ''),
     onSuccess: () => { toast.success('Record unlocked'); qc.invalidateQueries({ queryKey: ['hod', 'att', 'table'] }) },
@@ -136,6 +151,39 @@ export default function AttendancePage() {
 
       {tab === 'overview' && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-3">
+            <CardHeader title="Attendance Coordinator Management"
+              subtitle="Coordinators get the attendance-report page (daily & weekly PDFs across all batches)." />
+            <CardBody>
+              <div className="mb-3 flex flex-wrap items-end gap-2">
+                <div className="min-w-[220px]">
+                  <label className="mb-1 block text-xs font-medium text-text-muted">Add a faculty as coordinator</label>
+                  <Select value={coordPick} onChange={(e) => setCoordPick(e.target.value)}
+                    options={[{ value: '', label: 'Select faculty…' }, ...(coordinators.data?.facultyOptions ?? [])
+                      .filter((f) => !assignedIds.has(f.id))
+                      .map((f) => ({ value: f.id, label: `${f.name} (${f.employeeId})` }))]} />
+                </div>
+                <Button leftIcon={<UserPlus size={15} />} disabled={!coordPick} loading={assignCoord.isPending}
+                  onClick={() => assignCoord.mutate(coordPick)}>Add</Button>
+              </div>
+              {(coordinators.data?.coordinators ?? []).length === 0 ? (
+                <p className="text-sm text-text-muted">No attendance coordinators yet. Add one above.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {coordinators.data?.coordinators.map((c) => (
+                    <span key={c.facultyId} className="inline-flex items-center gap-2 rounded-full bg-surface-2 py-1 pl-3 pr-1.5 text-sm">
+                      <span className="font-medium">{c.name}</span>
+                      <span className="text-xs text-text-muted">{c.employeeId}</span>
+                      <button title="Remove" onClick={() => removeCoord.mutate(c.facultyId)}
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-text-muted hover:bg-danger-light hover:text-danger">
+                        <X size={14} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </CardBody>
+          </Card>
           <Card className="lg:col-span-2">
             <CardHeader title="Attendance Trend" subtitle="Average % per batch · last 6 months" />
             <CardBody>

@@ -7,6 +7,13 @@ import type { ArchiveSnapshot, ArchiveTree } from '@/types/archive'
 
 type Params = Record<string, string | number | boolean | undefined>
 
+export interface FacultyOption { id: string; name: string; employeeId: string }
+export interface AttendanceCoordinators {
+  semesterId: string
+  coordinators: { facultyId: string; name: string | null; employeeId: string | null }[]
+  facultyOptions: FacultyOption[]
+}
+
 export interface SubjectComponentCfg { key: string; label: string; weightagePct: number; isEnabled: boolean; marks?: number }
 export interface SubjectConfig {
   id: string; code: string; name: string; semesterNumber: number; credits: number; type: string; branch: string | null
@@ -153,6 +160,9 @@ export const hodApi = {
       api.patch('/hod/attendance/lock-all', { batchId, semesterId }).then((r) => r.data),
     export: (batchId: string, semesterId: string, format: ExportFormat = 'csv') =>
       downloadExport('/hod/attendance/export', 'attendance', format, { batchId, semesterId }),
+    coordinators: () => api.get<AttendanceCoordinators>('/hod/attendance/coordinators').then((r) => r.data),
+    assignCoordinator: (facultyId: string) => api.post('/hod/attendance/coordinators', { facultyId }).then((r) => r.data),
+    removeCoordinator: (facultyId: string) => api.delete(`/hod/attendance/coordinators/${facultyId}`).then((r) => r.data),
   },
 
   // ── Subjects ──

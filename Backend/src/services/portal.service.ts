@@ -5,6 +5,7 @@ import { studentAiBridge } from "./studentAiBridge.service.js";
 import { generateStudyPlanForStudent, getLatestStudyPlan, refreshStudyPlanAfterProgress } from "./studyPlanner.service.js";
 import type { Role, YearLevel } from "../types/domain.js";
 import type { ExportTable } from "../utils/export.js";
+import { renderDailyAttendancePdf, renderWeeklyAttendancePdf, type DailyBatch, type WeeklyStudent } from "../utils/attendancePdf.js";
 import { ApiError, buildPagination } from "../utils/http.js";
 import type { Prisma } from "@prisma/client";
 
@@ -134,6 +135,35 @@ function monthLabels(months: number) {
 // These event types override the timetable and disable attendance for the day.
 const NON_WORKING_TYPES = new Set(["HOLIDAY", "PUBLIC_HOLIDAY", "READING_HOLIDAY", "SEMESTER_BREAK"]);
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// ── Attendance-coordinator report helpers ──
+const INSTITUTE = "L J Institute of Engineering and Technology";
+const initials = (name: string) => (name.replace(/\b(prof|dr|mr|ms|mrs)\.?/gi, "").match(/[A-Za-z]+/g) ?? []).map((w) => w[0]!.toUpperCase()).join("").slice(0, 3) || "—";
+const fmtDate = (d: Date) => `${String(d.getUTCDate()).padStart(2, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${d.getUTCFullYear()}`;
+// Attendance lectureDate is a @db.Date (midnight UTC). Parse an incoming yyyy-mm-dd
+// the same way so equality/`lte` comparisons line up regardless of server timezone.
+function attnDate(raw: string) {
+  const s = (raw || "").slice(0, 10);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00.000Z`) : new Date();
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+async function assertAttendanceCoordinator(facultyId: string, semesterId: string, semesterLabel: string) {
+  if (!semesterId) throw new ApiError(400, "NO_ACTIVE_SEMESTER", "No active semester.");
+  const row = await prisma.attendanceCoordinator.findFirst({ where: { semesterId, facultyId } });
+  if (!row) throw new ApiError(403, "NOT_ATTENDANCE_COORDINATOR", `You are not an attendance coordinator for ${semesterLabel}.`);
+}
+
+// Continuous department-wide roll numbers (ordered batch code, then enrollment no),
+// matching the compiled sheet where C1=1.., C2 continues, etc.
+async function attendanceRoster(semesterId: string) {
+  const enrs = await prisma.studentEnrollment.findMany({
+    where: { semesterId, isCurrent: true },
+    select: { id: true, studentId: true, student: { select: { enrollmentNo: true, name: true } }, batch: { select: { code: true } } },
+  });
+  enrs.sort((a, b) => a.batch.code.localeCompare(b.batch.code) || a.student.enrollmentNo.localeCompare(b.student.enrollmentNo));
+  return enrs.map((e, i) => ({ id: e.id, studentId: e.studentId, enrollmentNo: e.student.enrollmentNo, name: e.student.name, batchCode: e.batch.code, roll: i + 1 }));
+}
 
 export interface DayStatus {
   date: string;         // yyyy-mm-dd
@@ -5483,6 +5513,136 @@ export const portalService = {
     const sem = await scopeSemester(scope);
     await prisma.examCoordinator.deleteMany({ where: { semesterId: sem.id, slot } });
     return { removed: true };
+  },
+
+  // ── Attendance Coordinators (HOD assigns any number) ──────
+  async attendanceCoordinators(scope: Scope) {
+    const sem = await scopeSemester(scope);
+    const rows = sem.id ? await prisma.attendanceCoordinator.findMany({ where: { semesterId: sem.id }, orderBy: { createdAt: "asc" } }) : [];
+    const facs = rows.length ? await prisma.faculty.findMany({ where: { id: { in: rows.map((r) => r.facultyId) } }, select: { id: true, name: true, employeeId: true } }) : [];
+    const byId = new Map(facs.map((f) => [f.id, f]));
+    const options = await prisma.faculty.findMany({
+      where: { universityId: scope.universityId, isHod: false, isDean: false, isActive: true, deletedAt: null },
+      select: { id: true, name: true, employeeId: true }, orderBy: { name: "asc" },
+    });
+    return {
+      semesterId: sem.id,
+      coordinators: rows.map((r) => ({ facultyId: r.facultyId, name: byId.get(r.facultyId)?.name ?? null, employeeId: byId.get(r.facultyId)?.employeeId ?? null })),
+      facultyOptions: options,
+    };
+  },
+
+  async assignAttendanceCoordinator(scope: Scope, facultyId: string) {
+    const sem = await scopeSemester(scope);
+    if (!sem.id) throw new ApiError(400, "NO_ACTIVE_SEMESTER", "No active semester.");
+    const fac = await prisma.faculty.findFirst({ where: { id: facultyId, universityId: scope.universityId, isHod: false, deletedAt: null } });
+    if (!fac) throw new ApiError(404, "FACULTY_NOT_FOUND", "Faculty not found or is a HOD.");
+    await prisma.attendanceCoordinator.upsert({
+      where: { semesterId_facultyId: { semesterId: sem.id, facultyId } },
+      update: {},
+      create: { universityId: scope.universityId, semesterId: sem.id, facultyId, assignedById: scope.userId },
+    });
+    await this.notifyMany(scope.universityId, [{ facultyId }], "ATTENDANCE_COORDINATOR_ASSIGNED",
+      "You are an Attendance Coordinator", `The HOD made you an Attendance Coordinator for ${sem.label}.`, "/faculty/attendance-coordinator");
+    return { facultyId, name: fac.name };
+  },
+
+  async removeAttendanceCoordinator(scope: Scope, facultyId: string) {
+    const sem = await scopeSemester(scope);
+    if (sem.id) await prisma.attendanceCoordinator.deleteMany({ where: { semesterId: sem.id, facultyId } });
+    return { removed: true };
+  },
+
+  async facultyAttendanceCoordinatorStatus(facultyId: string, universityId: string) {
+    const sem = await facultyActiveSemester(facultyId, universityId);
+    const row = sem.id ? await prisma.attendanceCoordinator.findFirst({ where: { semesterId: sem.id, facultyId } }) : null;
+    return { isCoordinator: !!row, semesterId: sem.id, semesterLabel: sem.label };
+  },
+
+  // Daily attendance sheet — every batch on one date, absent roll numbers coloured
+  // BLACK (absent in all their lectures that day) or RED (partial). Returns a PDF.
+  async dailyAttendancePdf(facultyId: string, universityId: string, dateStr: string) {
+    const sem = await facultyActiveSemester(facultyId, universityId);
+    await assertAttendanceCoordinator(facultyId, sem.id, sem.label);
+    const date = attnDate(dateStr);
+    const roster = await attendanceRoster(sem.id);
+    const rollByEnr = new Map(roster.map((r) => [r.id, r.roll]));
+    const batchOfEnr = new Map(roster.map((r) => [r.id, r.batchCode]));
+    const recs = await prisma.attendanceRecord.findMany({
+      where: { enrollmentId: { in: roster.map((r) => r.id) }, lectureDate: date },
+      select: { enrollmentId: true, subjectId: true, facultyId: true, isPresent: true },
+    });
+    // Per-student daily totals decide BLACK (all absent) vs RED (partial).
+    const daily = new Map<string, { total: number; absent: number }>();
+    for (const r of recs) {
+      const d = daily.get(r.enrollmentId) ?? { total: 0, absent: 0 };
+      d.total++; if (!r.isPresent) d.absent++; daily.set(r.enrollmentId, d);
+    }
+    const subjects = await prisma.subject.findMany({ where: { universityId, semesterNumber: sem.number, deletedAt: null }, select: { id: true, code: true } });
+    const subCode = new Map(subjects.map((s) => [s.id, s.code]));
+    const facs = await prisma.faculty.findMany({ where: { id: { in: [...new Set(recs.map((r) => r.facultyId))] } }, select: { id: true, mentorCode: true, name: true } });
+    const facCode = new Map(facs.map((f) => [f.id, f.mentorCode || initials(f.name)]));
+    // batchCode → subjectId → { facultyId, absent[] }
+    const byBatch = new Map<string, Map<string, { facultyId: string; absent: { roll: number; partial: boolean }[] }>>();
+    for (const r of recs) {
+      const bc = batchOfEnr.get(r.enrollmentId); if (!bc) continue;
+      let subs = byBatch.get(bc); if (!subs) { subs = new Map(); byBatch.set(bc, subs); }
+      let cell = subs.get(r.subjectId); if (!cell) { cell = { facultyId: r.facultyId, absent: [] }; subs.set(r.subjectId, cell); }
+      if (!r.isPresent) {
+        const d = daily.get(r.enrollmentId)!;
+        cell.absent.push({ roll: rollByEnr.get(r.enrollmentId)!, partial: d.absent < d.total });
+      }
+    }
+    const batches: DailyBatch[] = [...byBatch.keys()].sort().map((code) => ({
+      code,
+      lectures: [...byBatch.get(code)!.entries()]
+        .sort((a, b) => (subCode.get(a[0]) ?? "").localeCompare(subCode.get(b[0]) ?? ""))
+        .map(([sid, cell], i) => ({ no: i + 1, subject: subCode.get(sid) ?? "?", faculty: facCode.get(cell.facultyId) ?? "—", absent: cell.absent.sort((x, y) => x.roll - y.roll) })),
+    }));
+    const weekNo = Math.max(1, Math.ceil((date.getTime() - new Date(sem.startDate).getTime()) / (7 * 86400000)));
+    return renderDailyAttendancePdf({
+      institute: INSTITUTE, department: `${sem.yearLevel}-${sem.number}`, semester: sem.label,
+      date: fmtDate(date), weekNo, day: DAY_NAMES[date.getUTCDay()], batches,
+    });
+  },
+
+  // Weekly compiled sheet — per-student subject-wise + overall attendance up to a
+  // date, with mentor, students below the threshold in red. Returns a PDF.
+  async weeklyAttendancePdf(facultyId: string, universityId: string, uptoStr: string) {
+    const sem = await facultyActiveSemester(facultyId, universityId);
+    await assertAttendanceCoordinator(facultyId, sem.id, sem.label);
+    const upto = attnDate(uptoStr);
+    const roster = await attendanceRoster(sem.id);
+    const subjects = await prisma.subject.findMany({ where: { universityId, semesterNumber: sem.number, deletedAt: null }, select: { id: true, code: true }, orderBy: { code: "asc" } });
+    const subPos = new Map(subjects.map((s, i) => [s.id, i]));
+    const grouped = await prisma.attendanceRecord.groupBy({
+      by: ["enrollmentId", "subjectId", "isPresent"],
+      where: { enrollmentId: { in: roster.map((r) => r.id) }, lectureDate: { lte: upto } },
+      _count: { _all: true },
+    });
+    // enrollmentId → per-subject [attended, total]
+    const agg = new Map<string, { att: number[]; tot: number[] }>();
+    for (const g of grouped) {
+      const pos = subPos.get(g.subjectId); if (pos === undefined) continue;
+      let a = agg.get(g.enrollmentId); if (!a) { a = { att: subjects.map(() => 0), tot: subjects.map(() => 0) }; agg.set(g.enrollmentId, a); }
+      a.tot[pos] += g._count._all; if (g.isPresent) a.att[pos] += g._count._all;
+    }
+    const mentors = await prisma.mentorAssignment.findMany({ where: { semesterId: sem.id, studentId: { in: roster.map((r) => r.studentId) } }, select: { studentId: true, mentorCode: true } });
+    const mentorOf = new Map(mentors.map((m) => [m.studentId, m.mentorCode]));
+    const students: WeeklyStudent[] = roster.map((r) => {
+      const a = agg.get(r.id) ?? { att: subjects.map(() => 0), tot: subjects.map(() => 0) };
+      const overallAttended = a.att.reduce((s, v) => s + v, 0);
+      const overallTotal = a.tot.reduce((s, v) => s + v, 0);
+      return {
+        roll: r.roll, div: r.batchCode, enrollmentNo: r.enrollmentNo, name: r.name,
+        subjects: a.att.map((att, i) => ({ attended: att, total: a.tot[i] })),
+        overallAttended, overallTotal, mentor: mentorOf.get(r.studentId) ?? "—",
+      };
+    });
+    return renderWeeklyAttendancePdf({
+      institute: INSTITUTE, department: `${sem.yearLevel}-${sem.number}`, semester: sem.label,
+      uptoLabel: `up to ${fmtDate(upto)}`, subjectCodes: subjects.map((s) => s.code), students, threshold: 75,
+    });
   },
 
   async facultyExamStatus(facultyId: string, universityId: string) {

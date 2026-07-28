@@ -30,6 +30,7 @@ const FacDashboard = lazy(() => import('@/pages/faculty/DashboardPage'))
 const FacSchedule = lazy(() => import('@/pages/faculty/SchedulePage'))
 const FacStudents = lazy(() => import('@/pages/faculty/StudentsPage'))
 const FacAttendance = lazy(() => import('@/pages/faculty/AttendancePage'))
+const FacAttendanceReport = lazy(() => import('@/pages/faculty/AttendanceCoordinatorPage'))
 const FacNotes = lazy(() => import('@/pages/faculty/NotesPage'))
 const FacQuizzes = lazy(() => import('@/pages/faculty/QuizzesPage'))
 const FacAnnouncements = lazy(() => import('@/pages/faculty/AnnouncementsPage'))
@@ -105,6 +106,7 @@ export const router = createBrowserRouter([
           { path: '/faculty/schedule', element: <FacSchedule /> },
           { path: '/faculty/students', element: <FacStudents /> },
           { path: '/faculty/attendance', element: <FacAttendance /> },
+          { path: '/faculty/attendance-report', element: <FacAttendanceReport /> },
           { path: '/faculty/notes', element: <FacNotes /> },
           { path: '/faculty/quizzes', element: <FacQuizzes /> },
           { path: '/faculty/announcements', element: <FacAnnouncements /> },
