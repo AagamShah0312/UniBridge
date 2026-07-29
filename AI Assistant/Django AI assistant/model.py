@@ -103,9 +103,12 @@ def retrain_from_db() -> dict[str, Any]:
     if len(rows) < 20:
         return {"status": "skipped", "reason": "Insufficient data (< 20 result rows)"}
 
-    grouped: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+    grouped: dict[tuple[str, str], dict[str, tuple[float, float]]] = defaultdict(dict)
     for row in rows:
-        grouped[(str(row.enrollment_id), str(row.subject_id))][row.phase.label.upper()] = float(row.marks_obtained)
+        grouped[(str(row.enrollment_id), str(row.subject_id))][row.phase.label.upper()] = (
+            float(row.marks_obtained),
+            float(row.max_marks),
+        )
 
     x_rows: list[list[float]] = []
     y_rows: list[float] = []
@@ -114,10 +117,13 @@ def retrain_from_db() -> dict[str, Any]:
         t2 = marks_by_type.get("T2")
         t3 = marks_by_type.get("T3")
         t4 = marks_by_type.get("T4")
-        if None not in {t1, t2, t3, t4}:
+        if all(value is not None for value in (t1, t2, t3, t4)):
             assert t1 is not None and t2 is not None and t3 is not None and t4 is not None
-            x_rows.append([t1, t2, t3, np.mean([t1, t2, t3]), np.std([t1, t2, t3])])
-            y_rows.append(t4)
+            normalized = lambda value, target: (value[0] / value[1]) * target if value[1] > 0 else 0.0
+            t1_value, t2_value, t3_value = normalized(t1, 25.0), normalized(t2, 25.0), normalized(t3, 25.0)
+            t4_value = normalized(t4, 50.0)
+            x_rows.append([t1_value, t2_value, t3_value, np.mean([t1_value, t2_value, t3_value]), np.std([t1_value, t2_value, t3_value])])
+            y_rows.append(t4_value)
 
     if len(x_rows) < 10:
         return {"status": "skipped", "reason": "Not enough complete T1/T2/T3/T4 records in database"}

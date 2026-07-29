@@ -9,7 +9,7 @@ export function notFoundHandler(_req: Request, _res: Response, next: NextFunctio
 
 export function errorHandler(
   error: unknown,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction,
 ) {
@@ -53,6 +53,7 @@ export function errorHandler(
   }
 
   const message = error instanceof Error ? error.message : "Unexpected server error.";
+  console.error(`[API] ${req.method} ${req.originalUrl} failed`, error);
   return res.status(500).json({
     error: {
       code: "INTERNAL_SERVER_ERROR",

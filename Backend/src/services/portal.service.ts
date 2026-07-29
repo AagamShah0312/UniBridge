@@ -1849,7 +1849,7 @@ export const portalService = {
         create: { subjectId, semesterId: activeSemester.id, topicFrequencies: {} },
       });
     }
-    await bestEffortStudentAi(() => studentAiBridge.triggerPyqProcessing(pyq.id));
+    await bestEffortStudentAi(() => studentAiBridge.triggerPyqProcessing(pyq.id, presignGetUrl(fileKey, 3600) || undefined));
     return { uploaded: 1, subjectId, pyqId: pyq.id, processingStatus: studentAiBridge.isConfigured() ? "queued" : "uploaded" };
   },
 
@@ -3890,7 +3890,9 @@ export const portalService = {
       const tests = new Map<string, number>();
 
       for (const row of group) {
-        tests.set(normalizePhaseKey(row.phase.label, row.phase.number), Number(row.marksObtained));
+        const maxMarks = Number(row.maxMarks);
+        const normalised = maxMarks > 0 ? (Number(row.marksObtained) / maxMarks) * 25 : 0;
+        tests.set(normalizePhaseKey(row.phase.label, row.phase.number), clamp(normalised, 0, 25));
       }
 
       if (tests.has("T4") || !["T1", "T2", "T3"].every((name) => tests.has(name))) {

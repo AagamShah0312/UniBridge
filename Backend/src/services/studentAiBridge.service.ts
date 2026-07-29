@@ -99,8 +99,11 @@ export const studentAiBridge = {
     });
   },
 
-  triggerPyqProcessing(pyqId: string) {
-    return requestInternal<{ pyq_id: string; status: string; job_id?: string }>(`pyqs/${pyqId}/process`, { method: "POST" });
+  triggerPyqProcessing(pyqId: string, sourceUrl?: string) {
+    return requestInternal<{ pyq_id: string; status: string; job_id?: string }>(`pyqs/${pyqId}/process`, {
+      method: "POST",
+      body: JSON.stringify(sourceUrl ? { source_url: sourceUrl } : {}),
+    });
   },
 
   getQuizChapters(subjectId: string) {

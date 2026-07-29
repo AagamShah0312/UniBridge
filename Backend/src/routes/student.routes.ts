@@ -269,6 +269,15 @@ studentRouter.get("/mentor/messages", asyncHandler(async (req, res) => {
   res.json(await portalService.studentMentorMessages(req.user!.id, req.user!.universityId, Number(req.query.page ?? 1), Number(req.query.limit ?? 30)));
 }));
 
+// Compatibility for older browser bundles that used /student/messages.
+studentRouter.get("/messages", asyncHandler(async (req, res) => {
+  res.json(await portalService.studentMentorMessages(req.user!.id, req.user!.universityId, Number(req.query.page ?? 1), Number(req.query.limit ?? 30)));
+}));
+
+studentRouter.patch("/messages/mark-read", asyncHandler(async (req, res) => {
+  res.json(await portalService.markStudentMentorMessagesRead(req.user!.id, req.user!.universityId));
+}));
+
 studentRouter.get("/mentor", asyncHandler(async (req, res) => {
   res.json(await portalService.studentMentor(req.user!.id, req.user!.universityId, req.query.semesterId as string | undefined));
 }));

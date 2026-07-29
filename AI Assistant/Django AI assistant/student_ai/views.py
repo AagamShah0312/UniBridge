@@ -345,7 +345,8 @@ class InternalPYQProcessView(APIView):
     def post(self, request, pyq_id: str):
         pyq = PYQFile.objects.select_related("subject").get(pk=pyq_id)
         job = create_job("pyq_analysis", {"pyq_id": pyq_id}, university_id=str(pyq.subject.university_id))
-        submit_job(job, analyze_pyq, pyq)
+        body = request.data if isinstance(request.data, dict) else {}
+        submit_job(job, analyze_pyq, pyq, source_url=body.get("source_url"))
         return Response({"success": True, "message": "PYQ processing queued.", "data": {"pyq_id": pyq_id, "job_id": str(job.id), "status": "queued"}}, status=status.HTTP_202_ACCEPTED)
 
 

@@ -13,8 +13,8 @@ from student_ai.services.ingestion_service import extract_document_text, resolve
 from student_ai.models import AIDocumentChunk, AIDocumentMetadata
 
 
-def process_pyq_document(pyq_file: PYQFile) -> dict:
-    path = resolve_local_path(pyq_file.file_url, pyq_file.file_key)
+def process_pyq_document(pyq_file: PYQFile, *, source_url: str | None = None) -> dict:
+    path = resolve_local_path(source_url or pyq_file.file_url, pyq_file.file_key)
     digest = file_hash(path)
     document, _created = AIDocument.objects.update_or_create(
         pyq_file=pyq_file,

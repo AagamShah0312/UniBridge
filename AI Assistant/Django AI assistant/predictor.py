@@ -74,6 +74,13 @@ def _phase_key(result: Result) -> str:
     return label
 
 
+def _normalise_mark(marks_obtained: float, max_marks: float, target_max: float) -> float:
+    """Convert stored result marks to the scale expected by the predictor."""
+    if max_marks <= 0:
+        return 0.0
+    return max(0.0, min(target_max, (marks_obtained / max_marks) * target_max))
+
+
 def predict_student_next_semester_marks(student_id: str) -> Optional[dict]:
     student = Student.objects.filter(pk=student_id).first()
     if not student:
@@ -94,7 +101,10 @@ def predict_student_next_semester_marks(student_id: str) -> Optional[dict]:
     predictions: list[dict] = []
     for group in grouped.values():
         first = group[0]
-        tests = {_phase_key(item): float(item.marks_obtained) for item in group}
+        tests = {
+            _phase_key(item): _normalise_mark(float(item.marks_obtained), float(item.max_marks), 25.0)
+            for item in group
+        }
         if "T4" in tests or not all(name in tests for name in ("T1", "T2", "T3")):
             continue
 
