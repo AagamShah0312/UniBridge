@@ -43,29 +43,43 @@ def _matching_chunks(subject_id: str, chapters: list[str]) -> list[AIDocumentChu
 
 
 def _fallback_questions(chunks: list[AIDocumentChunk], count: int, seed: str) -> list[dict]:
-    sentences: list[str] = []
+    sentences: list[tuple[str, str]] = []
     for chunk in chunks:
         for sentence in re.split(r"(?<=[.!?])\s+", chunk.content):
             cleaned = " ".join(sentence.split())
-            if 45 <= len(cleaned) <= 260 and cleaned not in sentences:
-                sentences.append(cleaned)
-    if len(sentences) < 4:
+            if 12 <= len(cleaned) <= 260 and cleaned not in [item[0] for item in sentences]:
+                sentences.append((cleaned, _chapter_label(chunk)))
+    if not sentences:
         return []
     rng = random.Random(seed)
     rng.shuffle(sentences)
+    stop_words = {"about","after","also","and","are","between","called","each","from","have","into","more","note","only","that","the","their","there","these","this","through","with","which"}
+    vocabulary = list({word for sentace, _chapter in sentences for word in re.findall(r"[a-zA-Z][A-Za-z0-9_-]{3,}", sentace) if word.lower() not in stop_words})
+    if len(vocabulary) < 4:
+        return []
     questions: list[dict] = []
-    for index, correct in enumerate(sentences[:count]):
-        distractors = [item for item in sentences if item != correct][:]
-        rng.shuffle(distractors)
-        options = [correct, *distractors[:3]]
-        rng.shuffle(options)
-        questions.append({
-            "text": "Which statement is supported by the selected faculty note?",
-            "options": options,
-            "correct_index": options.index(correct),
-            "explanation": "This statement is taken directly from the selected faculty-note material.",
-            "chapter": "Selected notes",
-        })
+    for sentence, chapter in sentences:
+        candidates = [word for word in re.findall(r"[a-zA-Z][A-Za-z0-9_-]{3,}", sentence) if word.lower() not in stop_words]
+        if not candidates:
+            continue
+        rng.shuffle(candidates)
+        for correct in dict.fromkeys(candidates):
+            distractors = [word for word in vocabulary if word.casefold() != correct.casefold()]
+            rng.shuffle(distractors)
+            options = [correct, *distractors[:3]]
+            if len(options) != 4:
+                continue
+            rng.shuffle(options)
+            cloze = re.sub(re.escape(correct), "_____", sentence, flags=re.IGNORECASE)
+            questions.append({
+                "text": f"Complete this statemet from {chapter}: {cloze}",
+                "options": options,
+                "correct_index": options.index(correct),
+                "explanation": f"The missing term in the faculty material is '{correct}'.",
+                "chapter": chapter,
+            })
+        if len(questions) >= count:
+            break
     return questions
 
 
@@ -81,8 +95,11 @@ def generate_quiz(subject_id: str, chapters: list[str], question_count: int, see
     context = "\n\n".join(
         f"[Chapter: {_chapter_label(chunk)}]\n{chunk.content}"
         for chunk in chunks
-    )[:12000]
+    )[:6000]
     requested = max(4, min(int(question_count or 10), 20))
+    local_questions = _fallback_questions(chunks, requested, seed)
+    if len(context) < 600 and len(local_questions) >=4:
+        return {"subject_id": str(subject.id), "chapters": selected, "questions": local_questions}
     system = "You create accurate university practice MCQs from faculty notes. Return JSON only."
     prompt = f"""Create exactly {requested} different MCQs for {subject.code} - {subject.name}.
 Use only the supplied faculty-note context. Each question needs exactly four plausible, distinct options and one correct answer.
@@ -95,10 +112,9 @@ FACULTY NOTE CONTEXT:
     questions: list[dict] = []
     try:
         service = GeminiDocumentService()
-        service.ai.timeout = 8
+        service.ai.timeout = 55
         service.ai.max_retries = 1
-        service.fallback_ai.timeout = 8
-        service.fallback_ai.max_retries = 1
+        service.fallback_ai.model = service.ai.model
         payload = service.json_chat(system, prompt, fallback={"questions": []})
         for item in payload.get("questions", []) if isinstance(payload, dict) else []:
             options = item.get("options") if isinstance(item, dict) else None
@@ -113,11 +129,11 @@ FACULTY NOTE CONTEXT:
                 })
             if len(questions) >= requested:
                 break
-    except AIServiceError:
+    except Exception:
         questions = []
     questions = [question for question in questions if question["text"]]
     if len(questions) < 4:
-        questions = _fallback_questions(chunks, requested, seed)
+        questions = local_questions
     if len(questions) < 4:
         raise ValueError("The selected notes do not contain enough readable content to create a quiz.")
     return {"subject_id": str(subject.id), "chapters": selected, "questions": questions}

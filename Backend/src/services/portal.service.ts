@@ -3300,7 +3300,7 @@ export const portalService = {
     const { semester, enrollment } = await getStudentEnrollment(studentId, universityId, query.semesterId as string | undefined);
     const subjectIds = await getStudentSubjectIds(studentId, universityId, semester.id);
     const now = new Date();
-    const quizzes = await prisma.quiz.findMany({ where: { isPublished: true, deletedAt: null, semesterId: semester.id, subjectId: { in: subjectIds }, OR: [{ studentId }, { studentId: null, targets: { some: { batchId: enrollment.batchId } } }] }, include: { subject: { select: { code: true, name: true } }, _count: { select: { questions: true } }, attempts: { where: { studentId }, select: { score: true, submittedAt: true, attemptNumber: true } } } });
+    const quizzes = await prisma.quiz.findMany({ where: { isPublished: true, deletedAt: null, semesterId: semester.id, subjectId: { in: subjectIds }, OR: [{ studentId }, { studentId: null, targets: { some: { batchId: enrollment.batchId } } }] }, include: { subject: { select: { code: true, name: true } }, _count: { select: { questions: true } }, attempts: { where: { studentId }, select: { score: true, submittedAt: true, attemptNumber: true } } }, orderBy: { createdAt: "desc" } });
     const rows = quizzes.map((quiz) => {
       const bestScore = quiz.attempts.length ? Math.max(...quiz.attempts.map((attempt) => attempt.score)) : null;
       const expired = isQuizExpired(quiz.dueDate);
@@ -3413,10 +3413,16 @@ export const portalService = {
     const chapters = [...new Set((body.chapters ?? []).map((chapter) => String(chapter).trim()).filter(Boolean))];
     if (!chapters.length) throw new ApiError(400, "CHAPTER_REQUIRED", "Choose at least one chapter.");
     if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
-    const generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
+    let generated: Awaited<ReturnType<typeof studentAiBridge.generateQuiz>>;
+    try{
+      generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10),20)), seed: `${studentId}:${Date.now()}` });
+    } catch (error){
+      throw new ApiError(502, "AI_QUIZ_GENERATION_FAILED", error instanceof Error ? error.message : "The AI quiz service is unavailable. Please Retry");
+    }
     if (!generated?.questions?.length) throw new ApiError(422, "QUIZ_GENERATION_FAILED", "No questions could be generated from the selected notes.");
     const subject = await subjectById(body.subjectId);
-    const quiz = await prisma.quiz.create({ data: { studentId, subjectId: body.subjectId, semesterId: semester.id, title: `${subject.code} AI practice quiz`, description: `Generated from: ${chapters.join(", ")}`, isAiGenerated: true, isPublished: true, maxAttempts: 3, chapterNames: chapters, questions: { create: generated.questions.map((question, index) => ({ text: question.text, options: question.options.map((text, optionIndex) => ({ id: String.fromCharCode(65 + optionIndex), text })), correctOption: String.fromCharCode(65 + question.correct_index), explanation: question.explanation || null, order: index })) } }, include: { _count: { select: { questions: true } } } });
+    const chapterTitle = chapters.join(", ").slice(0, 80);
+    const quiz = await prisma.quiz.create({ data: { studentId, subjectId: body.subjectId, semesterId: semester.id, title: `${subject.code} AI practice: ${chapterTitle}`, description: `Generated from: ${chapters.join(", ")}`, isAiGenerated: true, isPublished: true, maxAttempts: 3, chapterNames: chapters, questions: { create: generated.questions.map((question, index) => ({ text: question.text, options: question.options.map((text, optionIndex) => ({ id: String.fromCharCode(65 + optionIndex), text })), correctOption: String.fromCharCode(65 + question.correct_index), explanation: question.explanation || null, order: index })) } }, include: { _count: { select: { questions: true } } } });
     return { id: quiz.id, title: quiz.title, questionCount: quiz._count.questions, maxAttempts: quiz.maxAttempts };
   },
 
