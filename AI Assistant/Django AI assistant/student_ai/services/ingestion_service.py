@@ -110,10 +110,10 @@ def _extract_note_structure(note: Note, extracted: str) -> dict:
         "You are processing a faculty-uploaded study document once for retrieval. "
         "Return valid JSON only with keys: short_summary, detailed_notes, bullet_notes, "
         "important_definitions, key_formulae, flashcards, important_questions, units, "
-        "chapters, keywords, prerequisites, tables, formulas. Preserve academic hierarchy."
-        "Write a useful student-facing short_summaryand detailed_notes. Create 6 to 10 "
-        "concise flashcards as objects with question and answer keys whenever the document"
-        " contains enough study material; do not leave flashcards empty in that case."
+        "chapters, keywords, prerequisites, tables, formulas. Preserve academic hierarchy. "
+        "Write a useful student-facing short_summary and detailed_notes. Create 6 to 10 "
+        "concise flashcards as objects with question and answer keys whenever the document "
+        "contains enough study material; do not leave flashcards empty in that case."
     )
     user = (
         f"Subject: {note.subject.code} {note.subject.name}\n"
@@ -139,13 +139,13 @@ def _extractive_note_structure(extracted: str) -> dict:
         term, meaning = line.split(":", 1)
         if term.strip() and meaning.strip() and len(term.strip()) <= 100:
             definitions.append(f"{term.strip()}: {meaning.strip()}")
-        flashcards = []
-        for defination in definitions[:8]:
-            term, meaning = defination.split(":", 1)
-            flashcards.append({"question": f"What is {term.strip()}?", "answer": meaning.strip()})
-        if not flashcards:
-            for index,sentence in enumerate(sentences[:6],start=1):
-                flashcards.append({"question": f"State the key point {index} from the note.", "answer": sentence})
+    flashcards = []
+    for definition in definitions[:8]:
+        term, meaning = definition.split(":", 1)
+        flashcards.append({"question": f"What is {term.strip()}?", "answer": meaning.strip()})
+    if not flashcards:
+        for index, sentence in enumerate(sentences[:6], start=1):
+            flashcards.append({"question": f"State the key point {index} from the note.", "answer": sentence})
     return {
         "short_summary": " ".join(sentences[:3])[:1200] or extracted[:1200],
         "detailed_notes": "\n\n".join(paragraphs)[:10000],

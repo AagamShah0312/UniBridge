@@ -54,7 +54,7 @@ def _fallback_questions(chunks: list[AIDocumentChunk], count: int, seed: str) ->
     rng = random.Random(seed)
     rng.shuffle(sentences)
     stop_words = {"about","after","also","and","are","between","called","each","from","have","into","more","note","only","that","the","their","there","these","this","through","with","which"}
-    vocabulary = list({word for sentace, _chapter in sentences for word in re.findall(r"[a-zA-Z][A-Za-z0-9_-]{3,}", sentace) if word.lower() not in stop_words})
+    vocabulary = list({word for sentence, _chapter in sentences for word in re.findall(r"[a-zA-Z][A-Za-z0-9_-]{3,}", sentence) if word.lower() not in stop_words})
     if len(vocabulary) < 4:
         return []
     questions: list[dict] = []
@@ -72,12 +72,14 @@ def _fallback_questions(chunks: list[AIDocumentChunk], count: int, seed: str) ->
             rng.shuffle(options)
             cloze = re.sub(re.escape(correct), "_____", sentence, flags=re.IGNORECASE)
             questions.append({
-                "text": f"Complete this statemet from {chapter}: {cloze}",
+                "text": f"Complete this statement from {chapter}: {cloze}",
                 "options": options,
                 "correct_index": options.index(correct),
                 "explanation": f"The missing term in the faculty material is '{correct}'.",
                 "chapter": chapter,
             })
+            if len(questions) >= count:
+                break
         if len(questions) >= count:
             break
     return questions
@@ -98,7 +100,7 @@ def generate_quiz(subject_id: str, chapters: list[str], question_count: int, see
     )[:6000]
     requested = max(4, min(int(question_count or 10), 20))
     local_questions = _fallback_questions(chunks, requested, seed)
-    if len(context) < 600 and len(local_questions) >=4:
+    if len(context) < 600 and len(local_questions) >= 4:
         return {"subject_id": str(subject.id), "chapters": selected, "questions": local_questions}
     system = "You create accurate university practice MCQs from faculty notes. Return JSON only."
     prompt = f"""Create exactly {requested} different MCQs for {subject.code} - {subject.name}.

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { BarChart3, BrainCircuit, Pencil, Plus, RefreshCcw, Send, Sparkles, Target, Trash2 } from 'lucide-react'
+import { BarChart3, BrainCircuit, Maximize2, Minimize2, Pencil, Plus, RefreshCcw, Send, Sparkles, Target, Trash2 } from 'lucide-react'
 import { studentApi } from '@/api/student'
 import { errorMessage } from '@/api/client'
 import { PageShell } from '@/components/shared/PageShell'
@@ -25,6 +25,7 @@ export default function AIAssistantPage() {
   const [chatSubjectId, setChatSubjectId] = useState('')
   const [analysisSubjectId, setAnalysisSubjectId] = useState('')
   const [text, setText] = useState('')
+  const [focusChat, setFocusChat] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const intentionallyClosedChatId = useRef<string | null>(null)
 
@@ -133,6 +134,23 @@ export default function AIAssistantPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [conversation.data?.messages?.length])
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) setFocusChat(false)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  const enterFocusChat = () => {
+    setFocusChat(true)
+    void document.documentElement.requestFullscreen?.().catch(() => undefined)
+  }
+  const exitFocusChat = () => {
+    setFocusChat(false)
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+  }
 
   const marksData = marksPrediction.data as {
     predicted_percentage?: number
@@ -275,9 +293,10 @@ export default function AIAssistantPage() {
                       <div className="text-sm font-semibold text-text-primary">{conversationItems.find((item) => item.id === selectedId)?.title ?? 'Conversation'}</div>
                       <div className="text-[11px] text-text-muted">Reopen any previous thread from the selector below.</div>
                     </div>
-                    <Button variant="outline" size="sm" onClick={() => conversation.refetch()} loading={conversation.isFetching}>
-                      Refresh
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" leftIcon={<Maximize2 size={14} />} onClick={enterFocusChat}>Focus</Button>
+                      <Button variant="outline" size="sm" onClick={() => conversation.refetch()} loading={conversation.isFetching}>Refresh</Button>
+                    </div>
                   </div>
                   <Select
                     value={selectedId ?? ''}
@@ -474,6 +493,36 @@ export default function AIAssistantPage() {
               )}
             </CardBody>
           </Card>
+        </div>
+      )}
+
+      {focusChat && selectedId && (
+        <div className="fixed inset-0 z-[100] flex h-dvh flex-col bg-surface">
+          <header className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-6">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-text-primary">{conversationItems.find((item) => item.id === selectedId)?.title ?? 'Conversation'}</div>
+              <div className="text-[11px] text-text-muted">Focused chat</div>
+            </div>
+            <Button variant="outline" size="sm" leftIcon={<Minimize2 size={14} />} onClick={exitFocusChat}>Exit focus</Button>
+          </header>
+          <main className="scrollbar-thin mx-auto flex w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6">
+            {conversation.isLoading ? (
+              <CardSkeleton height={220} />
+            ) : conversation.isError ? (
+              <EmptyState icon={<BrainCircuit size={22} />} title="Conversation unavailable" description={errorMessage(conversation.error)} action={<Button onClick={() => conversation.refetch()}>Retry</Button>} className="flex-1 border-0" />
+            ) : conversation.data?.messages?.length === 0 ? (
+              <p className="my-auto text-center text-sm text-text-muted">Ask about your notes, PYQs, weak topics, or revision plan.</p>
+            ) : (
+              <div className="space-y-3 pb-4">
+                {conversation.data?.messages?.map((message) => <MessageBubble key={message.id} message={message} />)}
+                <div ref={bottomRef} />
+              </div>
+            )}
+          </main>
+          <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) send.mutate() }} className="mx-auto flex w-full max-w-5xl gap-2 border-t border-border bg-surface px-4 py-3 sm:px-6">
+            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask a question..." />
+            <Button type="submit" disabled={!text.trim()} loading={send.isPending} leftIcon={<Send size={14} />}>Send</Button>
+          </form>
         </div>
       )}
     </PageShell>

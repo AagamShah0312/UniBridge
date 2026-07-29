@@ -3414,10 +3414,10 @@ export const portalService = {
     if (!chapters.length) throw new ApiError(400, "CHAPTER_REQUIRED", "Choose at least one chapter.");
     if (!studentAiBridge.isConfigured()) throw new ApiError(503, "AI_UNAVAILABLE", "AI quiz generation service is unavailable.");
     let generated: Awaited<ReturnType<typeof studentAiBridge.generateQuiz>>;
-    try{
-      generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10),20)), seed: `${studentId}:${Date.now()}` });
-    } catch (error){
-      throw new ApiError(502, "AI_QUIZ_GENERATION_FAILED", error instanceof Error ? error.message : "The AI quiz service is unavailable. Please Retry");
+    try {
+      generated = await studentAiBridge.generateQuiz({ studentId, subjectId: body.subjectId, chapters, questionCount: Math.max(4, Math.min(Number(body.questionCount ?? 10), 20)), seed: `${studentId}:${Date.now()}` });
+    } catch (error) {
+      throw new ApiError(502, "AI_QUIZ_GENERATION_FAILED", error instanceof Error ? error.message : "The AI quiz service is unavailable. Please retry.");
     }
     if (!generated?.questions?.length) throw new ApiError(422, "QUIZ_GENERATION_FAILED", "No questions could be generated from the selected notes.");
     const subject = await subjectById(body.subjectId);

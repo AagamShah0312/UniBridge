@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, HelpCircle, Pencil, Play, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import { studentApi } from '@/api/student'
@@ -14,7 +14,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 
 type Question = { id: string; text: string; options: { id: string; label: string; text: string }[] }
-type QuizAttempt = { quizId: string; title: string; attemptNumber: number; questions: Question[] }
+type QuizAttempt = { quizId: string; title: string; attemptNumber: number; timeLimitMins?: number | null; expiresAt?: string; questions: Question[] }
 type QuizResult = { quizId: string; score: number; correctCount: number; totalQuestions: number; attemptsTaken: number; maxAttempts?: number; results: Array<{ questionId: string; questionText: string; options?: { id: string; label: string; text: string }[]; selectedOption: string; correctOption: string; isCorrect: boolean; explanation?: string }> }
 
 export default function StudentQuizzesPage() {
@@ -26,13 +26,15 @@ export default function StudentQuizzesPage() {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [result, setResult] = useState<QuizResult | null>(null)
   const [review, setReview] = useState<QuizResult | null>(null)
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
+  const autoSubmitted = useRef(false)
   const list = useQuery({ queryKey: ['student', 'quizzes'], queryFn: () => studentApi.quizzes({ limit: 50 }) })
   const subjects = useQuery({ queryKey: ['student', 'subjects'], queryFn: studentApi.subjects })
   const chapters = useQuery({ queryKey: ['student', 'quiz-chapters', subjectId], queryFn: () => studentApi.quizChapters(subjectId), enabled: Boolean(subjectId), refetchInterval: (query) => query.state.data?.processing ? 5000 : false })
   const refresh = () => client.invalidateQueries({ queryKey: ['student', 'quizzes'] })
   const generate = useMutation({ mutationFn: studentApi.generateAiQuiz, onSuccess: () => { setGeneratorOpen(false); setSelectedChapters([]); refresh() } })
-  const start = useMutation({ mutationFn: studentApi.startQuiz, onSuccess: (data) => { setAnswers({}); setActiveAttempt(data) } })
-  const submit = useMutation({ mutationFn: ({ id, selected, presentation }: { id: string; selected: Record<string, string>; presentation: unknown }) => studentApi.submitQuiz(id, selected, presentation), onSuccess: (data) => { setActiveAttempt(null); setResult(data); refresh() } })
+  const start = useMutation({ mutationFn: studentApi.startQuiz, onSuccess: (data) => { autoSubmitted.current = false; setAnswers({}); setRemainingSeconds(null); setActiveAttempt(data) } })
+  const submit = useMutation({ mutationFn: ({ id, selected, presentation, autoSubmit }: { id: string; selected: Record<string, string>; presentation: unknown; autoSubmit?: boolean }) => studentApi.submitQuiz(id, selected, presentation, autoSubmit), onSuccess: (data) => { setRemainingSeconds(null); setActiveAttempt(null); setResult(data); refresh() } })
   const loadReview = useMutation({ mutationFn: studentApi.quizResult, onSuccess: setReview })
   const removeQuiz = useMutation({ mutationFn: studentApi.deleteAiQuiz, onSuccess: refresh })
   const renameQuiz = useMutation({ mutationFn: ({ id, title }: { id: string; title: string }) => studentApi.renameAiQuiz(id, title), onSuccess: refresh })
@@ -44,10 +46,30 @@ export default function StudentQuizzesPage() {
 
   const toggleChapter = (chapter: string) => setSelectedChapters((current) => current.includes(chapter) ? current.filter((item) => item !== chapter) : [...current, chapter])
   const openAttempt = (quiz: StudentQuiz) => start.mutate(quiz.id)
-  const submitAttempt = () => {
-    if (!activeAttempt || activeAttempt.questions.some((question) => !answers[question.id])) return
-    submit.mutate({ id: activeAttempt.quizId, selected: answers, presentation: { questionOrder: activeAttempt.questions.map((question) => question.id), optionOrder: Object.fromEntries(activeAttempt.questions.map((question) => [question.id, question.options.map((option) => option.id)])) } })
+  const submitAttempt = (autoSubmit = false) => {
+    if (!activeAttempt || (!autoSubmit && activeAttempt.questions.some((question) => !answers[question.id]))) return
+    submit.mutate({ id: activeAttempt.quizId, selected: answers, autoSubmit, presentation: { questionOrder: activeAttempt.questions.map((question) => question.id), optionOrder: Object.fromEntries(activeAttempt.questions.map((question) => [question.id, question.options.map((option) => option.id)])) } })
   }
+
+  useEffect(() => {
+    if (!activeAttempt?.expiresAt || !activeAttempt.timeLimitMins) {
+      setRemainingSeconds(null)
+      return
+    }
+    const tick = () => {
+      const seconds = Math.max(0, Math.ceil((new Date(activeAttempt.expiresAt!).getTime() - Date.now()) / 1000))
+      setRemainingSeconds(seconds)
+      if (seconds === 0 && !autoSubmitted.current) {
+        autoSubmitted.current = true
+        submitAttempt(true)
+      }
+    }
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [activeAttempt, answers])
+
+  const timerLabel = remainingSeconds == null ? null : `${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, '0')}`
 
   return (
     <PageShell title="Quizzes" subtitle={list.data ? `${list.data.total} available` : 'Generate practice quizzes from faculty notes'} action={<Button leftIcon={<Sparkles size={15} />} onClick={() => setGeneratorOpen(true)}>Generate with AI</Button>}>
@@ -69,7 +91,7 @@ export default function StudentQuizzesPage() {
         {generate.error && <p className="mt-3 text-xs text-danger">{errorMessage(generate.error, 'Unable to generate the quiz.')}</p>}
       </Modal>
 
-      <Modal open={Boolean(activeAttempt)} onClose={() => !submit.isPending && setActiveAttempt(null)} title={activeAttempt?.title} subtitle={`Attempt ${activeAttempt?.attemptNumber ?? 1} · Choose one answer for every MCQ`} size="lg" footer={<><span className="mr-auto text-xs text-text-muted">{Object.keys(answers).length}/{activeAttempt?.questions.length ?? 0} answered</span><Button variant="outline" onClick={() => setActiveAttempt(null)}>Cancel</Button><Button loading={submit.isPending} disabled={!activeAttempt || activeAttempt.questions.some((question) => !answers[question.id])} onClick={submitAttempt}>Submit quiz</Button></>}>
+      <Modal open={Boolean(activeAttempt)} onClose={() => !submit.isPending && setActiveAttempt(null)} title={activeAttempt?.title} subtitle={`Attempt ${activeAttempt?.attemptNumber ?? 1} · Choose one answer for every MCQ`} size="lg" footer={<><span className="mr-auto text-xs text-text-muted">{Object.keys(answers).length}/{activeAttempt?.questions.length ?? 0} answered</span>{timerLabel && <span className={`mr-3 rounded-sm px-3 py-1 text-sm font-bold ${remainingSeconds != null && remainingSeconds <= 60 ? 'bg-danger-light text-danger' : 'bg-primary-light text-primary'}`}>Time left {timerLabel}</span>}<Button variant="outline" onClick={() => setActiveAttempt(null)}>Cancel</Button><Button loading={submit.isPending} disabled={!activeAttempt || activeAttempt.questions.some((question) => !answers[question.id])} onClick={() => submitAttempt()}>Submit quiz</Button></>}>
         <div className="space-y-5">{activeAttempt?.questions.map((question, index) => <div key={question.id} className="rounded-card border border-border p-4"><div className="mb-3 text-sm font-semibold text-text-primary"><span className="mr-2 text-primary">{index + 1}.</span>{question.text}</div><div className="grid gap-2">{question.options.map((option) => <label key={option.id} className={`flex cursor-pointer items-start gap-3 rounded-sm border p-3 text-sm transition-colors ${answers[question.id] === option.id ? 'border-primary bg-primary-light text-primary' : 'border-border text-text-secondary hover:bg-surface-2'}`}><input type="radio" name={question.id} checked={answers[question.id] === option.id} onChange={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))} className="mt-0.5 accent-primary" /><span><b className="mr-2">{option.label}.</b>{option.text}</span></label>)}</div></div>)}</div>
       </Modal>
 
