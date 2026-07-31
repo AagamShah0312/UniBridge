@@ -2097,7 +2097,7 @@ export const portalService = {
       const enrollmentNo = String(record.enrollment_no ?? "");
       const mentorCode = String(record.mentor_code ?? "");
       const student = await prisma.student.findFirst({ where: { enrollmentNo } });
-      const faculty = await prisma.faculty.findFirst({ where: { mentorCode } });
+      const faculty = await prisma.faculty.findFirst({ where: { mentorCode, isHod: false } });
       if (!student) { errors.push({ row, enrollmentNo, reason: "Student not found" }); continue; }
       if (!faculty) { errors.push({ row, enrollmentNo, reason: `Mentor code ${mentorCode} not found` }); continue; }
       const existing = await getMentorAssignment(student.id, semesterId);
@@ -2113,6 +2113,7 @@ export const portalService = {
     const existing = await getMentorAssignment(student.id, semesterId);
     if (!existing) throw new ApiError(404, "NOT_FOUND", "Mentor assignment not found.");
     const newFaculty = await facultyById(newFacultyId);
+    if (newFaculty.isHod) throw new ApiError(400, "CANNOT_ASSIGN_TO_HOD", "Cannot assign mentor to HOD.");
     await prisma.mentorAssignment.update({ where: { id: existing.id }, data: { facultyId: newFacultyId, mentorCode: newFaculty.mentorCode ?? "" } });
     return { enrollmentNo: student.enrollmentNo, newMentorCode: newFaculty.mentorCode };
   },
@@ -2701,7 +2702,7 @@ export const portalService = {
   // ── Calendar Events ───────────────────────────────────────
 
   async calendarEvents(universityId: string, query: Record<string, string | number | undefined>) {
-    const where: any = { universityId };
+    const where: any = { universityId, deletedAt: null };
     if (query.year && query.month) {
       const y = Number(query.year); const m = Number(query.month);
       const start = new Date(y, m - 1, 1); const end = new Date(y, m, 0);
@@ -2749,6 +2750,36 @@ export const portalService = {
 
   async deleteEvent(eventId: string) {
     await prisma.calendarEvent.update({ where: { id: eventId }, data: { deletedAt: new Date() } });
+  },
+
+  // Hard-clear the whole academic calendar for the university (all events vanish
+  // for HOD, faculty and students immediately).
+  async clearCalendar(universityId: string) {
+    const { count } = await prisma.calendarEvent.deleteMany({ where: { universityId } });
+    return { cleared: count };
+  },
+
+  // Bulk-import an academic calendar from a CSV/Excel file the HOD uploads.
+  // With replace=true the existing calendar is wiped first, so the uploaded sheet
+  // becomes the single source of truth shown to everyone.
+  async importCalendar(universityId: string, facultyId: string, file: { buffer: Buffer; originalname: string } | undefined, replace: boolean) {
+    if (!file?.buffer?.length) throw new ApiError(400, "NO_FILE", "Upload a .csv or .xlsx file.");
+    const { parseCalendarFile } = await import("../utils/calendarImport.js");
+    const { rows, errors } = await parseCalendarFile(file.buffer, file.originalname);
+    if (rows.length === 0) throw new ApiError(400, "NO_EVENTS", errors[0] ?? "No calendar events could be read from the file.");
+    if (replace) await prisma.calendarEvent.deleteMany({ where: { universityId } });
+    const { count } = await prisma.calendarEvent.createMany({
+      data: rows.map((e) => ({
+        universityId, title: e.title, description: e.description, startDate: e.startDate, endDate: e.endDate,
+        eventType: e.type as any, visibleTo: e.visibleTo as any, createdById: facultyId,
+      })),
+    });
+    return { imported: count, replaced: replace, skipped: errors.length, warnings: errors.slice(0, 12) };
+  },
+
+  async calendarTemplate() {
+    const { CALENDAR_TEMPLATE_CSV } = await import("../utils/calendarImport.js");
+    return CALENDAR_TEMPLATE_CSV;
   },
 
   async phaseTimeline(scope: Scope, semesterId?: string) {
@@ -5111,8 +5142,10 @@ export const portalService = {
   },
 
   async updateMentorCode(employeeId: string, mentorCode: string) {
+    // HODs are faculty too — they take lectures and need a mentor code so the
+    // timetable/attendance shows who took the class. They still never get
+    // mentees (assignMentor / assignMentorCsv / auto-assign all exclude HODs).
     const f = await facultyByEmployeeId(employeeId);
-    if (f.isHod) throw new ApiError(400, "CANNOT_SET_MENTOR_CODE_FOR_HOD", "HOD cannot have a mentor code.");
     const conflict = await prisma.faculty.findFirst({ where: { mentorCode, universityId: f.universityId, id: { not: f.id } } });
     if (conflict) throw new ApiError(409, "MENTOR_CODE_ALREADY_IN_USE", "Mentor code already in use.");
     await prisma.faculty.update({ where: { id: f.id }, data: { mentorCode } });
@@ -5565,44 +5598,60 @@ export const portalService = {
     const sem = await facultyActiveSemester(facultyId, universityId);
     await assertAttendanceCoordinator(facultyId, sem.id, sem.label);
     const date = attnDate(dateStr);
+    const dow = date.getUTCDay();
     const roster = await attendanceRoster(sem.id);
     const rollByEnr = new Map(roster.map((r) => [r.id, r.roll]));
     const batchOfEnr = new Map(roster.map((r) => [r.id, r.batchCode]));
+
+    // Timetable-driven: the report shows exactly the lectures scheduled for this
+    // weekday (one row per timetable slot), never every subject in the semester.
+    const slots = await prisma.timetableSlot.findMany({
+      where: { semesterId: sem.id, dayOfWeek: dow },
+      include: { subject: { select: { id: true, code: true } }, batch: { select: { code: true } } },
+      orderBy: [{ batch: { code: "asc" } }, { slotStart: "asc" }],
+    });
+    const facs = await prisma.faculty.findMany({ where: { id: { in: [...new Set(slots.map((s) => s.facultyId).filter(Boolean))] as string[] } }, select: { id: true, mentorCode: true, name: true } });
+    const facCode = new Map(facs.map((f) => [f.id, f.mentorCode || initials(f.name)]));
+
+    // Distinct timetabled subjects per batch decide a student's lecture count today,
+    // so BLACK (absent in ALL of the day's lectures) vs RED (partial) is accurate.
+    const batchSubjects = new Map<string, Set<string>>();
+    for (const s of slots) { const set = batchSubjects.get(s.batch.code) ?? new Set<string>(); set.add(s.subject.id); batchSubjects.set(s.batch.code, set); }
+
     const recs = await prisma.attendanceRecord.findMany({
       where: { enrollmentId: { in: roster.map((r) => r.id) }, lectureDate: date },
-      select: { enrollmentId: true, subjectId: true, facultyId: true, isPresent: true },
+      select: { enrollmentId: true, subjectId: true, isPresent: true },
     });
-    // Per-student daily totals decide BLACK (all absent) vs RED (partial).
     const daily = new Map<string, { total: number; absent: number }>();
-    for (const r of recs) {
-      const d = daily.get(r.enrollmentId) ?? { total: 0, absent: 0 };
-      d.total++; if (!r.isPresent) d.absent++; daily.set(r.enrollmentId, d);
-    }
-    const subjects = await prisma.subject.findMany({ where: { universityId, semesterNumber: sem.number, deletedAt: null }, select: { id: true, code: true } });
-    const subCode = new Map(subjects.map((s) => [s.id, s.code]));
-    const facs = await prisma.faculty.findMany({ where: { id: { in: [...new Set(recs.map((r) => r.facultyId))] } }, select: { id: true, mentorCode: true, name: true } });
-    const facCode = new Map(facs.map((f) => [f.id, f.mentorCode || initials(f.name)]));
-    // batchCode → subjectId → { facultyId, absent[] }
-    const byBatch = new Map<string, Map<string, { facultyId: string; absent: { roll: number; partial: boolean }[] }>>();
+    for (const r of roster) daily.set(r.id, { total: batchSubjects.get(r.batchCode)?.size ?? 0, absent: 0 });
+    // batchCode → subjectId → enrollmentIds absent (only for timetabled subjects)
+    const absentBy = new Map<string, Map<string, Set<string>>>();
     for (const r of recs) {
       const bc = batchOfEnr.get(r.enrollmentId); if (!bc) continue;
-      let subs = byBatch.get(bc); if (!subs) { subs = new Map(); byBatch.set(bc, subs); }
-      let cell = subs.get(r.subjectId); if (!cell) { cell = { facultyId: r.facultyId, absent: [] }; subs.set(r.subjectId, cell); }
-      if (!r.isPresent) {
-        const d = daily.get(r.enrollmentId)!;
-        cell.absent.push({ roll: rollByEnr.get(r.enrollmentId)!, partial: d.absent < d.total });
-      }
+      if (!batchSubjects.get(bc)?.has(r.subjectId)) continue; // ignore non-timetabled records
+      if (r.isPresent) continue;
+      daily.get(r.enrollmentId)!.absent++;
+      let m = absentBy.get(bc); if (!m) { m = new Map(); absentBy.set(bc, m); }
+      let set = m.get(r.subjectId); if (!set) { set = new Set(); m.set(r.subjectId, set); }
+      set.add(r.enrollmentId);
     }
-    const batches: DailyBatch[] = [...byBatch.keys()].sort().map((code) => ({
+
+    const slotsByBatch = new Map<string, typeof slots>();
+    for (const s of slots) { const arr = slotsByBatch.get(s.batch.code) ?? []; arr.push(s); slotsByBatch.set(s.batch.code, arr); }
+    const batches: DailyBatch[] = [...slotsByBatch.keys()].sort().map((code) => ({
       code,
-      lectures: [...byBatch.get(code)!.entries()]
-        .sort((a, b) => (subCode.get(a[0]) ?? "").localeCompare(subCode.get(b[0]) ?? ""))
-        .map(([sid, cell], i) => ({ no: i + 1, subject: subCode.get(sid) ?? "?", faculty: facCode.get(cell.facultyId) ?? "—", absent: cell.absent.sort((x, y) => x.roll - y.roll) })),
+      lectures: slotsByBatch.get(code)!.map((s, i) => {
+        const absentEnr = absentBy.get(code)?.get(s.subject.id) ?? new Set<string>();
+        const absent = [...absentEnr]
+          .map((enrId) => { const d = daily.get(enrId)!; return { roll: rollByEnr.get(enrId)!, partial: d.absent < d.total }; })
+          .sort((a, b) => a.roll - b.roll);
+        return { no: i + 1, subject: s.subject.code, faculty: s.facultyId ? (facCode.get(s.facultyId) ?? "—") : "—", absent };
+      }),
     }));
     const weekNo = Math.max(1, Math.ceil((date.getTime() - new Date(sem.startDate).getTime()) / (7 * 86400000)));
     return renderDailyAttendancePdf({
       institute: INSTITUTE, department: `${sem.yearLevel}-${sem.number}`, semester: sem.label,
-      date: fmtDate(date), weekNo, day: DAY_NAMES[date.getUTCDay()], batches,
+      date: fmtDate(date), weekNo, day: DAY_NAMES[dow], batches,
     });
   },
 
@@ -5757,6 +5806,71 @@ export const portalService = {
     const day = attnDate(dateStr);
     await prisma.proxyLecture.deleteMany({ where: { slotId, lectureDate: day, semesterId: sem.id } });
     return { removed: true };
+  },
+
+  // ── Coordinator: who has filled a day's attendance ──
+  // A faculty is "finished" only when EVERY lecture they take that day is marked.
+  // Effective faculty = proxy (if reassigned) else the slot's assigned faculty.
+  async coordinatorTodayStatus(facultyId: string, universityId: string, dateStr: string) {
+    const sem = await facultyActiveSemester(facultyId, universityId);
+    await assertAttendanceCoordinator(facultyId, sem.id, sem.label);
+    const day = attnDate(dateStr || new Date().toISOString().slice(0, 10));
+    const dow = day.getUTCDay();
+    const slots = await prisma.timetableSlot.findMany({
+      where: { semesterId: sem.id, dayOfWeek: dow },
+      include: { subject: { select: { code: true } }, batch: { select: { id: true, code: true } } },
+      orderBy: [{ batch: { code: "asc" } }, { slotStart: "asc" }],
+    });
+    const slotIds = slots.map((s) => s.id);
+    const proxies = slotIds.length ? await prisma.proxyLecture.findMany({ where: { lectureDate: day, slotId: { in: slotIds } } }) : [];
+    const proxyBySlot = new Map(proxies.map((p) => [p.slotId, p.proxyFacultyId]));
+
+    // A slot is "marked" if any attendance record exists for it that day. Match by
+    // slotId (app path) or the legacy null-slot path (subject+batch) so both count.
+    const subjectIds = [...new Set(slots.map((s) => s.subjectId))];
+    const recs = slotIds.length
+      ? await prisma.attendanceRecord.findMany({
+        where: { lectureDate: day, OR: [{ slotId: { in: slotIds } }, { slotId: null, subjectId: { in: subjectIds } }] },
+        select: { slotId: true, subjectId: true, enrollment: { select: { batchId: true } } },
+      })
+      : [];
+    const markedSlot = new Set(
+      slots.filter((s) => recs.some((r) => r.slotId === s.id || (r.slotId === null && r.subjectId === s.subjectId && r.enrollment.batchId === s.batchId))).map((s) => s.id),
+    );
+
+    // Group lectures by effective faculty (null = unassigned lecture).
+    const byFac = new Map<string | null, { total: number; marked: number }>();
+    for (const s of slots) {
+      const eff = proxyBySlot.get(s.id) ?? s.facultyId;
+      const b = byFac.get(eff) ?? { total: 0, marked: 0 };
+      b.total++; if (markedSlot.has(s.id)) b.marked++;
+      byFac.set(eff, b);
+    }
+    const facIds = [...byFac.keys()].filter((id): id is string => !!id);
+    const facs = facIds.length ? await prisma.faculty.findMany({ where: { id: { in: facIds } }, select: { id: true, name: true, employeeId: true, mentorCode: true } }) : [];
+    const facById = new Map(facs.map((f) => [f.id, f]));
+
+    const faculty = [...byFac.entries()].map(([id, b]) => {
+      const f = id ? facById.get(id) : null;
+      return {
+        facultyId: id, name: f?.name ?? "Unassigned", employeeId: f?.employeeId ?? null, mentorCode: f?.mentorCode ?? null,
+        total: b.total, marked: b.marked, remaining: b.total - b.marked,
+        status: b.marked === 0 ? "none" : b.marked === b.total ? "done" : "partial",
+      };
+    }).sort((a, b) => (a.remaining === b.remaining ? a.name.localeCompare(b.name) : b.remaining - a.remaining));
+
+    const realFaculty = faculty.filter((f) => f.facultyId); // exclude the unassigned bucket from headcounts
+    const batches = [...new Map(slots.map((s) => [s.batch.id, s.batch.code])).entries()].map(([id, code]) => ({ id, code }));
+    return {
+      date: day.toISOString().slice(0, 10), semesterLabel: sem.label,
+      summary: {
+        totalFaculty: realFaculty.length,
+        finished: realFaculty.filter((f) => f.status === "done").length,
+        pending: realFaculty.filter((f) => f.status !== "done").length,
+        totalLectures: slots.length, markedLectures: markedSlot.size,
+      },
+      faculty, batches,
+    };
   },
 
   async facultyExamStatus(facultyId: string, universityId: string) {
@@ -6678,7 +6792,7 @@ export const portalService = {
   },
 
   // ─── Faculty: daily attendance matrix ──────────────────────
-  async facultyAttendanceDay(universityId: string, facultyId: string, batchId: string, dateStr: string) {
+  async facultyAttendanceDay(universityId: string, facultyId: string, batchId: string, dateStr: string, asCoordinator = false) {
     if (!batchId || !dateStr) throw new ApiError(400, "VALIDATION_ERROR", "batchId and date are required.");
     const date = new Date(dateStr);
     if (Number.isNaN(date.getTime())) throw new ApiError(400, "VALIDATION_ERROR", "Invalid date.");
@@ -6688,6 +6802,7 @@ export const portalService = {
     // ponytail: resolve the batch's OWN active semester (several year levels active at once).
     const batch = await batchById(batchId);
     const activeSem = (await prisma.semester.findFirst({ where: { academicYearId: batch.academicYearId, status: "ACTIVE" } })) ?? await getActiveSemester(universityId);
+    if (asCoordinator) await assertAttendanceCoordinator(facultyId, activeSem.id, activeSem.label);
 
     const slots = await prisma.timetableSlot.findMany({
       where: { batchId, semesterId: activeSem.id, dayOfWeek },
@@ -6719,7 +6834,8 @@ export const portalService = {
     const daysDelta = Math.round((today.getTime() - day.getTime()) / 86400000);
     // Calendar gate: attendance is only allowed on working days (overrides the edit window).
     const dayStatus = await resolveDayStatus(universityId, dateStr);
-    const isEditable = dayStatus.isWorkingDay && daysDelta >= 0 && daysDelta <= 7;
+    // Coordinators can correct any past working day; regular faculty stay inside the 7-day window.
+    const isEditable = dayStatus.isWorkingDay && daysDelta >= 0 && (asCoordinator || daysDelta <= 7);
 
     // Subject-swap suggestions: any subject in the same semester, in case of proxy
     const allSubjects = (await subjectsBySemester(activeSem.id)).map((s) => ({ id: s.id, code: s.code, name: s.name }));
@@ -6755,7 +6871,7 @@ export const portalService = {
     batchId: string;
     date: string;
     lectures: { slotId?: string; subjectId: string; marks: Record<string, boolean> }[];
-  }) {
+  }, asCoordinator = false) {
     if (!body.batchId || !body.date || !Array.isArray(body.lectures)) throw new ApiError(400, "VALIDATION_ERROR", "batchId, date, lectures required.");
     const d = new Date(body.date);
     const day = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -6763,7 +6879,8 @@ export const portalService = {
     const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const daysDelta = Math.round((today.getTime() - day.getTime()) / 86400000);
     if (daysDelta < 0) throw new ApiError(400, "FUTURE_DATE", "Cannot mark future attendance.");
-    if (daysDelta > 7) throw new ApiError(403, "EDIT_WINDOW_EXPIRED", "Attendance older than 7 days cannot be edited.");
+    // Coordinators can correct any past working day; regular faculty stay inside the 7-day window.
+    if (!asCoordinator && daysDelta > 7) throw new ApiError(403, "EDIT_WINDOW_EXPIRED", "Attendance older than 7 days cannot be edited.");
     // Calendar gate: no attendance on holidays, reading holidays, semester breaks or Sundays.
     const dayStatus = await resolveDayStatus(universityId, body.date);
     if (!dayStatus.isWorkingDay) throw new ApiError(409, "NON_WORKING_DAY", `Attendance is disabled — ${dayStatus.reason ?? dayStatus.status}.`);
@@ -6771,6 +6888,7 @@ export const portalService = {
     // resolve the batch's own active semester (multiple year levels active at once)
     const batch = await batchById(body.batchId);
     const activeSem = (await prisma.semester.findFirst({ where: { academicYearId: batch.academicYearId, status: "ACTIVE" } })) ?? await getActiveSemester(universityId);
+    if (asCoordinator) await assertAttendanceCoordinator(facultyId, activeSem.id, activeSem.label);
     const enrollments = await prisma.studentEnrollment.findMany({
       where: { batchId: body.batchId, semesterId: activeSem.id, isCurrent: true },
       select: { id: true },
@@ -6788,7 +6906,7 @@ export const portalService = {
           where: { enrollmentId, lectureDate: day, slotId: lec.slotId },
         });
         if (existing) {
-          if (existing.isLocked) continue;
+          if (existing.isLocked && !asCoordinator) continue; // coordinators may override locked records
           await prisma.attendanceRecord.update({
             where: { id: existing.id },
             data: { isPresent, facultyId, subjectId: lec.subjectId },

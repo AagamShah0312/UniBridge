@@ -59,8 +59,8 @@ export default function StudentsPage() {
       batchId: batchId || undefined,
       status: status || undefined,
       semesterId: historySemesterId || undefined,
-      page,
-      limit: 20,
+      page: 1,
+      limit: 10000, // fetch all → sort spans every student, then paginate client-side
     }),
     [debouncedSearch, branch, batchId, status, historySemesterId, page],
   )
@@ -71,7 +71,7 @@ export default function StudentsPage() {
   })
   // Full branch list (student.branch stores the code) — not just codes on the visible page.
   const branchesQ = useQuery({ queryKey: ['hod', 'branches'], queryFn: hodApi.onboarding.branches })
-  const sort = useTableSort<StudentRow>(list.data?.data ?? [])
+  const sort = useTableSort<StudentRow>(list.data?.data ?? [], { pageSize: 20 })
   const th = { activeKey: sort.sortKey, dir: sort.sortDir, onSort: sort.onSort }
 
   const del = useMutation({
@@ -204,9 +204,9 @@ export default function StudentsPage() {
                 ))}
               </tbody>
             </Table>
-            {list.data && (
+            {list.data && sort.totalPages > 1 && (
               <div className="border-t border-border px-3">
-                <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} limit={list.data.limit} onPage={setPage} />
+                <Pagination {...sort.pagination} />
               </div>
             )}
           </>

@@ -49,7 +49,7 @@ export default function AttendancePage() {
   })
   const table = useQuery({
     queryKey: ['hod', 'att', 'table', batchId, semesterId, page],
-    queryFn: () => hodApi.attendance.table({ batchId, semesterId, page, limit: 20 }),
+    queryFn: () => hodApi.attendance.table({ batchId, semesterId, page, limit: 10000 }),
     enabled: ready && tab === 'table',
   })
   const heatmap = useQuery({
@@ -112,7 +112,7 @@ export default function AttendancePage() {
 
   const s = summary.data
 
-  const sort = useTableSort(table.data?.data ?? [])
+  const sort = useTableSort(table.data?.data ?? [], { pageSize: 20 })
   const th = { activeKey: sort.sortKey, dir: sort.sortDir, onSort: sort.onSort }
 
   return (
@@ -269,9 +269,9 @@ export default function AttendancePage() {
                   ))}
                 </tbody>
               </Table>
-              {table.data && (
+              {table.data && sort.totalPages > 1 && (
                 <div className="border-t border-border px-3">
-                  <Pagination page={table.data.page} totalPages={table.data.totalPages} total={table.data.total} limit={table.data.limit} onPage={setPage} />
+                  <Pagination {...sort.pagination} />
                 </div>
               )}
             </>

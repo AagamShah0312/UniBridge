@@ -82,17 +82,16 @@ export function FacultyDetailModal({ faculty, onClose }: { faculty: FacultyRow; 
             )}
           </div>
 
-          {!d.isHod && (
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">Mentor Code</label>
-              <div className="flex gap-2">
-                <Input value={mentorCode} onChange={(e) => setMentorCode(e.target.value.toUpperCase())} placeholder="e.g. SYD" className="max-w-40" />
-                <Button variant="outline" onClick={() => saveMentor.mutate()} loading={saveMentor.isPending} disabled={mentorCode === (d.mentorCode ?? '')}>
-                  Save
-                </Button>
-              </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">Mentor Code</label>
+            <div className="flex gap-2">
+              <Input value={mentorCode} onChange={(e) => setMentorCode(e.target.value.toUpperCase())} placeholder="e.g. SYD" className="max-w-40" />
+              <Button variant="outline" onClick={() => saveMentor.mutate()} loading={saveMentor.isPending} disabled={mentorCode === (d.mentorCode ?? '')}>
+                Save
+              </Button>
             </div>
-          )}
+            {d.isHod && <p className="mt-1 text-xs text-text-muted">HODs take lectures, so they get a code too — they are never assigned mentees.</p>}
+          </div>
 
           <div>
             <div className="mb-2 text-sm font-semibold text-text-primary">Assigned Subjects</div>

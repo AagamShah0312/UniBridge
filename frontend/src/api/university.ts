@@ -90,7 +90,7 @@ export const universityApi = {
   assignScope: (facultyId: string, batchId: string) => api.post('/admin/hod-scope', { facultyId, batchId }).then((r) => r.data),
   removeScope: (batchId: string) => api.delete(`/admin/hod-scope/${batchId}`).then((r) => r.data),
 
-  faculty: (params: { search?: string; page?: number }) => api.get<Paged<UniFacultyRow>>('/admin/faculty', { params }).then((r) => r.data),
+  faculty: (params: { search?: string; page?: number; limit?: number }) => api.get<Paged<UniFacultyRow>>('/admin/faculty', { params }).then((r) => r.data),
   createFaculty: (body: Record<string, unknown>) => api.post('/admin/faculty', body).then((r) => r.data),
   setFacultyActive: (id: string, isActive: boolean) => api.patch(`/admin/faculty/${id}/active`, { isActive }).then((r) => r.data),
   updateFaculty: (id: string, body: Record<string, unknown>) => api.put(`/admin/faculty/${id}`, body).then((r) => r.data),
@@ -99,7 +99,7 @@ export const universityApi = {
   uploadFacultyCsv: (form: FormData) => api.post('/admin/faculty/csv', form).then((r) => r.data),
   downloadFacultyTemplate: () => downloadBlob('/admin/faculty/csv/template', 'faculty-template.csv'),
 
-  students: (params: { search?: string; branch?: string; page?: number }) => api.get<Paged<UniStudentRow>>('/admin/students', { params }).then((r) => r.data),
+  students: (params: { search?: string; branch?: string; page?: number; limit?: number }) => api.get<Paged<UniStudentRow>>('/admin/students', { params }).then((r) => r.data),
   setStudentActive: (id: string, isActive: boolean) => api.patch(`/admin/students/${id}/active`, { isActive }).then((r) => r.data),
   studentDetail: (enrollmentNo: string) => api.get(`/admin/students/${enrollmentNo}`).then((r) => r.data),
   studentHistory: (enrollmentNo: string) => api.get<{ enrollmentNo: string; journey: { semesterNumber: number; semesterLabel: string; yearLevel: string; batchCode: string; rollNo: string; academicYear: string; isCurrent: boolean }[] }>(`/admin/students/${enrollmentNo}/history`).then((r) => r.data),

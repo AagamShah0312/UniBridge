@@ -31,7 +31,7 @@ export default function UniversityFacultyPage() {
   const [deleteOf, setDeleteOf] = useState<UniFacultyRow | null>(null)
   const [promoteOf, setPromoteOf] = useState<UniFacultyRow | null>(null)
 
-  const q = useQuery({ queryKey: ['uni', 'faculty', search, page], queryFn: () => universityApi.faculty({ search: search || undefined, page }) })
+  const q = useQuery({ queryKey: ['uni', 'faculty', search, page], queryFn: () => universityApi.faculty({ search: search || undefined, page, limit: 10000 }) })
   const invalidate = () => qc.invalidateQueries({ queryKey: ['uni', 'faculty'] })
 
   const toggle = useMutation({
@@ -50,7 +50,7 @@ export default function UniversityFacultyPage() {
     onError: (e) => { toast.error(errorMessage(e)); setPromoteOf(null) },
   })
 
-  const sort = useTableSort(q.data?.data ?? [])
+  const sort = useTableSort(q.data?.data ?? [], { pageSize: 20 })
   const th = { activeKey: sort.sortKey, dir: sort.sortDir, onSort: sort.onSort }
 
   return (
@@ -107,9 +107,9 @@ export default function UniversityFacultyPage() {
               ))}
             </tbody>
           </Table>
-          {(q.data?.totalPages ?? 1) > 1 && (
+          {sort.totalPages > 1 && (
             <div className="border-t border-border p-3">
-              <Pagination page={page} totalPages={q.data?.totalPages ?? 1} total={q.data?.total} onPage={setPage} />
+              <Pagination {...sort.pagination} />
             </div>
           )}
         </Card>

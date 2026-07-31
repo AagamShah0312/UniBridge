@@ -44,7 +44,7 @@ export default function FacultyPage() {
 
   const debouncedSearch = useDebounce(search)
   const filters = useMemo(
-    () => ({ search: debouncedSearch || undefined, role: role || undefined, status: status || undefined, semesterId: history.semesterId || undefined, page, limit: 10 }),
+    () => ({ search: debouncedSearch || undefined, role: role || undefined, status: status || undefined, semesterId: history.semesterId || undefined, page, limit: 10000 }),
     [debouncedSearch, role, status, history.semesterId, page],
   )
 
@@ -60,7 +60,7 @@ export default function FacultyPage() {
     onError: (e) => toast.error(errorMessage(e)),
   })
 
-  const sort = useTableSort(list.data?.data ?? [])
+  const sort = useTableSort(list.data?.data ?? [], { pageSize: 10 })
   const th = { activeKey: sort.sortKey, dir: sort.sortDir, onSort: sort.onSort }
 
   return (
@@ -144,9 +144,9 @@ export default function FacultyPage() {
                 ))}
               </tbody>
             </Table>
-            {list.data && (
+            {list.data && sort.totalPages > 1 && (
               <div className="border-t border-border px-3">
-                <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} limit={list.data.limit} onPage={setPage} />
+                <Pagination {...sort.pagination} />
               </div>
             )}
           </>

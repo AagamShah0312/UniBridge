@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ExportMenu } from '@/components/shared/ExportMenu'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { CalendarPlus, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { CalendarPlus, ChevronLeft, ChevronRight, Download, Eraser, Trash2, Upload } from 'lucide-react'
 import { hodApi } from '@/api/hod'
 import { errorMessage } from '@/api/client'
 import { useHodScope } from '@/hooks/hod/useHodScope'
@@ -40,6 +40,10 @@ export default function CalendarPage() {
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth())
   const [editing, setEditing] = useState<Partial<HodCalendarEvent> | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [replaceExisting, setReplaceExisting] = useState(true)
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; warnings: string[] } | null>(null)
 
   const events = useQuery({
     queryKey: ['hod', 'calendar', year, month],
@@ -73,6 +77,16 @@ export default function CalendarPage() {
     onSuccess: () => { toast.success('Event deleted'); invalidate(); setEditing(null) },
     onError: (err) => toast.error(errorMessage(err)),
   })
+  const importCal = useMutation({
+    mutationFn: () => hodApi.calendar.import(importFile!, replaceExisting),
+    onSuccess: (r) => { toast.success(`Imported ${r.imported} events${r.replaced ? ' (calendar replaced)' : ''}`); setImportResult(r); setImportFile(null); invalidate() },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+  const clearCal = useMutation({
+    mutationFn: () => hodApi.calendar.clear(),
+    onSuccess: (r) => { toast.success(`Cleared ${r.cleared} events`); invalidate() },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
 
   function prevMonth() { if (month === 0) { setMonth(11); setYear((y) => y - 1) } else setMonth((m) => m - 1) }
   function nextMonth() { if (month === 11) { setMonth(0); setYear((y) => y + 1) } else setMonth((m) => m + 1) }
@@ -82,7 +96,11 @@ export default function CalendarPage() {
       title="Academic Calendar"
       subtitle="Holidays, exams and phase schedule"
       action={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" leftIcon={<Download size={15} />} onClick={() => hodApi.calendar.template()}>Template</Button>
+          <Button variant="outline" leftIcon={<Upload size={15} />} onClick={() => { setImportResult(null); setImportOpen(true) }}>Import CSV/Excel</Button>
+          <Button variant="outline" leftIcon={<Eraser size={15} />} loading={clearCal.isPending}
+            onClick={() => window.confirm('Clear the ENTIRE academic calendar? This removes every event for all faculty and students.') && clearCal.mutate()}>Clear</Button>
           <ExportMenu onExport={(f) => hodApi.calendar.export(undefined, f)} />
           <Button leftIcon={<CalendarPlus size={15} />} onClick={() => setEditing({ date: format(new Date(), 'yyyy-MM-dd'), type: 'OTHER' })}>Add Event</Button>
         </div>
@@ -157,6 +175,25 @@ export default function CalendarPage() {
           </Card>
         </div>
       </div>
+
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import academic calendar" size="md"
+        footer={<>
+          <Button variant="outline" onClick={() => setImportOpen(false)}>Close</Button>
+          <Button leftIcon={<Upload size={15} />} loading={importCal.isPending} disabled={!importFile} onClick={() => importCal.mutate()}>Upload</Button>
+        </>}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-muted">Upload a <b>.csv</b> or <b>.xlsx</b> file with columns <b>Title, Start Date, End Date, Type, Description, Visibility</b>. Events appear in the grid and for every faculty and student. <button type="button" className="font-semibold text-primary underline" onClick={() => hodApi.calendar.template()}>Download template</button>.</p>
+          <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => { setImportFile(e.target.files?.[0] ?? null); setImportResult(null) }}
+            className="block w-full text-sm file:mr-3 file:rounded-sm file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white" />
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} className="h-4 w-4 accent-primary" /> Replace the existing calendar (recommended)</label>
+          {importResult && (
+            <div className="rounded-md bg-surface-2 p-3 text-xs">
+              <div className="font-semibold text-success">Imported {importResult.imported} events{importResult.skipped ? ` · ${importResult.skipped} skipped` : ''}.</div>
+              {importResult.warnings.length > 0 && <ul className="mt-1 list-disc pl-4 text-text-muted">{importResult.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {editing && (
         <Modal

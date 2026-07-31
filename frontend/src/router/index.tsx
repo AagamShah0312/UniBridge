@@ -31,6 +31,8 @@ const FacSchedule = lazy(() => import('@/pages/faculty/SchedulePage'))
 const FacStudents = lazy(() => import('@/pages/faculty/StudentsPage'))
 const FacAttendance = lazy(() => import('@/pages/faculty/AttendancePage'))
 const FacAttendanceReport = lazy(() => import('@/pages/faculty/AttendanceCoordinatorPage'))
+const FacExamDuties = lazy(() => import('@/pages/faculty/ExamDutiesPage'))
+const HodExamManagement = lazy(() => import('@/pages/hod/ExamManagementPage'))
 const FacNotes = lazy(() => import('@/pages/faculty/NotesPage'))
 const FacQuizzes = lazy(() => import('@/pages/faculty/QuizzesPage'))
 const FacAnnouncements = lazy(() => import('@/pages/faculty/AnnouncementsPage'))
@@ -91,6 +93,7 @@ export const router = createBrowserRouter([
           { path: '/hod/timetable', element: <HodTimetable /> },
           { path: '/hod/announcements', element: <HodAnnouncements /> },
           { path: '/hod/exams', element: <HodExamPanel /> },
+          { path: '/hod/exam-management', element: <HodExamManagement /> },
           { path: '/hod/notifications', element: <NotificationsPage /> },
           { path: '/faculty/notifications', element: <NotificationsPage /> },
           { path: '/student/notifications', element: <NotificationsPage /> },
@@ -107,6 +110,7 @@ export const router = createBrowserRouter([
           { path: '/faculty/students', element: <FacStudents /> },
           { path: '/faculty/attendance', element: <FacAttendance /> },
           { path: '/faculty/attendance-report', element: <FacAttendanceReport /> },
+          { path: '/faculty/exam-duties', element: <FacExamDuties /> },
           { path: '/faculty/notes', element: <FacNotes /> },
           { path: '/faculty/quizzes', element: <FacQuizzes /> },
           { path: '/faculty/announcements', element: <FacAnnouncements /> },

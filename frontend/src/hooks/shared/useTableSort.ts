@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 export type SortDir = 'asc' | 'desc'
 
@@ -7,16 +7,29 @@ function getVal(row: Record<string, unknown>, key: string): unknown {
   return key.split('.').reduce<unknown>((o, k) => (o == null ? o : (o as Record<string, unknown>)[k]), row)
 }
 
+export interface UseTableSortOptions {
+  initial?: { key: string; dir?: SortDir }
+  /**
+   * Enable client-side pagination on top of the sort. Pass the page size and give
+   * the hook the FULL dataset (fetch every row, e.g. `limit: 10000`) — it sorts
+   * across everything, then slices the current page. This is what makes sorting
+   * span the whole table instead of just the rows already on screen.
+   */
+  pageSize?: number
+}
+
 /**
- * Client-side sort for the rows currently on screen. Click a header to sort asc,
- * click again for desc. Numbers sort numerically, text naturally (case/number-aware),
- * and empty values always sink to the bottom.
+ * Sorts rows client-side (click a header for asc, again for desc; numbers sort
+ * numerically, text naturally, empty values sink). Numbers/computed columns work
+ * because the rows already carry those fields.
  *
- * Note: for server-paginated tables this sorts the visible page only.
+ * With `pageSize`, it also paginates: sort spans the ENTIRE dataset first, then the
+ * page is sliced from the sorted result — so feed it the full set, not a server page.
  */
-export function useTableSort<T>(rows: T[], initial?: { key: string; dir?: SortDir }) {
-  const [sortKey, setSortKey] = useState<string | null>(initial?.key ?? null)
-  const [sortDir, setSortDir] = useState<SortDir>(initial?.dir ?? 'asc')
+export function useTableSort<T>(rows: T[], opts?: UseTableSortOptions) {
+  const [sortKey, setSortKey] = useState<string | null>(opts?.initial?.key ?? null)
+  const [sortDir, setSortDir] = useState<SortDir>(opts?.initial?.dir ?? 'asc')
+  const [page, setPage] = useState(1)
 
   function onSort(key: string) {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -24,6 +37,7 @@ export function useTableSort<T>(rows: T[], initial?: { key: string; dir?: SortDi
       setSortKey(key)
       setSortDir('asc')
     }
+    setPage(1) // a new sort order starts from the first page
   }
 
   const sorted = useMemo(() => {
@@ -44,5 +58,27 @@ export function useTableSort<T>(rows: T[], initial?: { key: string; dir?: SortDi
     return copy
   }, [rows, sortKey, sortDir])
 
-  return { rows: sorted, sortKey, sortDir, onSort }
+  // New filter/search → new data array (react-query keeps a stable ref otherwise),
+  // so jump back to page 1 when the underlying rows actually change.
+  useEffect(() => { setPage(1) }, [rows])
+
+  const pageSize = opts?.pageSize
+  const total = sorted.length
+  const totalPages = pageSize ? Math.max(1, Math.ceil(total / pageSize)) : 1
+  const safePage = Math.min(page, totalPages)
+  const pageRows = pageSize ? sorted.slice((safePage - 1) * pageSize, safePage * pageSize) : sorted
+
+  return {
+    rows: pageRows,
+    sortKey,
+    sortDir,
+    onSort,
+    page: safePage,
+    setPage,
+    total,
+    totalPages,
+    limit: pageSize ?? total,
+    // Spreadable straight onto <Pagination {...sort.pagination} />.
+    pagination: { page: safePage, totalPages, total, limit: pageSize ?? total, onPage: setPage },
+  }
 }

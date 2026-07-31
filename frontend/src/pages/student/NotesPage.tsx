@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { CardSkeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { Select } from '@/components/ui/Select'
 import { NoteDrive } from '@/components/shared/NoteDrive'
 
 type SummaryPayload = {
@@ -56,7 +57,7 @@ export default function StudentNotesPage() {
         </div>
       </FilterBar>
 
-      <div className="mb-4 max-w-md"><select className="h-10 w-full rounded-sm border border-border bg-surface px-3 text-sm text-text-primary" value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setParentId(null) }}><option value="">Select subject</option>{subjectOptions.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} — {subject.name}</option>)}</select></div>
+      <div className="mb-4 max-w-md"><Select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setParentId(null) }} placeholder="Select subject">{subjectOptions.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} — {subject.name}</option>)}</Select></div>
       {drive.isLoading || subjects.isLoading ? (
         <CardSkeleton height={200} />
       ) : drive.data ? (

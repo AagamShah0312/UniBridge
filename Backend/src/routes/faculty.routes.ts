@@ -226,6 +226,17 @@ facultyRouter.post("/attendance/coordinator/proxies", asyncHandler(async (req, r
 facultyRouter.delete("/attendance/coordinator/proxies", asyncHandler(async (req, res) => {
   res.json(await portalService.removeProxyLecture(req.user!.id, req.user!.universityId, String(req.query.slotId ?? ""), String(req.query.date ?? "")));
 }));
+// Who has filled a day's attendance (all their lectures marked = finished) + editable-batch list.
+facultyRouter.get("/attendance/coordinator/today-status", asyncHandler(async (req, res) => {
+  res.json(await portalService.coordinatorTodayStatus(req.user!.id, req.user!.universityId, String(req.query.date ?? "")));
+}));
+// Coordinator edits ANY batch's day-matrix (bypasses the 7-day window + locks).
+facultyRouter.get("/attendance/coordinator/day", asyncHandler(async (req, res) => {
+  res.json(await portalService.facultyAttendanceDay(req.user!.universityId, req.user!.id, str(req.query.batchId), str(req.query.date), true));
+}));
+facultyRouter.post("/attendance/coordinator/day", asyncHandler(async (req, res) => {
+  res.json(await portalService.facultyAttendanceDaySave(req.user!.universityId, req.user!.id, req.body, true));
+}));
 facultyRouter.get("/attendance/coordinator/daily-pdf", asyncHandler(async (req, res) => {
   const pdf = await portalService.dailyAttendancePdf(req.user!.id, req.user!.universityId, String(req.query.date ?? ""));
   res.setHeader("Content-Type", "application/pdf");

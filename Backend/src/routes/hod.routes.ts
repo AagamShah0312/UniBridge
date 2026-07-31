@@ -190,6 +190,10 @@ hodRouter.get("/promotion/history", asyncHandler(async (req, res) => res.json(aw
 
 hodRouter.get("/calendar/events", asyncHandler(async (req, res) => res.json(await portalService.calendarEvents(req.user!.universityId, req.query as Record<string, string | number | undefined>))));
 hodRouter.get("/calendar/events/upcoming", asyncHandler(async (req, res) => res.json(await portalService.upcomingEvents(req.user!.universityId, Number(req.query.limit ?? 6)))));
+// CSV/Excel bulk calendar management (must precede the /:eventId param route).
+hodRouter.get("/calendar/template", asyncHandler(async (_req, res) => sendCsv(res, "academic-calendar-template.csv", await portalService.calendarTemplate())));
+hodRouter.post("/calendar/import", upload.single("file"), asyncHandler(async (req, res) => res.json(await portalService.importCalendar(req.user!.universityId, req.user!.id, req.file, String(req.body.replace ?? "true") !== "false"))));
+hodRouter.delete("/calendar/clear", asyncHandler(async (req, res) => res.json(await portalService.clearCalendar(req.user!.universityId))));
 hodRouter.get("/calendar/events/:eventId", asyncHandler(async (req, res) => res.json(await portalService.getEvent(str(req.params.eventId)))));
 hodRouter.post("/calendar/events", asyncHandler(async (req, res) => res.status(201).json(await portalService.createEvent(req.user!.universityId, req.user!.id, req.body))));
 hodRouter.put("/calendar/events/:eventId", asyncHandler(async (req, res) => res.json(await portalService.updateEvent(str(req.params.eventId), req.body))));

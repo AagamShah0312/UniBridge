@@ -65,6 +65,26 @@ export const facultyApi = {
     api.post('/faculty/attendance/coordinator/proxies', { slotId, date, proxyFacultyId }).then((r) => r.data),
   removeProxyLecture: (slotId: string, date: string) =>
     api.delete('/faculty/attendance/coordinator/proxies', { params: { slotId, date } }).then((r) => r.data),
+  // Coordinator: who has filled a day's attendance + which batches they can edit.
+  coordinatorTodayStatus: (date: string) =>
+    api.get<{
+      date: string; semesterLabel: string
+      summary: { totalFaculty: number; finished: number; pending: number; totalLectures: number; markedLectures: number }
+      faculty: { facultyId: string | null; name: string; employeeId: string | null; mentorCode: string | null; total: number; marked: number; remaining: number; status: 'done' | 'partial' | 'none' }[]
+      batches: { id: string; code: string }[]
+    }>('/faculty/attendance/coordinator/today-status', { params: { date } }).then((r) => r.data),
+  // Coordinator: edit ANY batch's day-matrix (same shape as attendanceDay).
+  coordinatorAttendanceDay: (batchId: string, date: string) =>
+    api.get<{
+      date: string; dayOfWeek: number; isEditable: boolean; daysDelta: number
+      dayStatus?: { isWorkingDay: boolean; status: string; reason: string | null }
+      lectures: { slotId: string; subjectId: string; subjectCode: string; subjectName: string; slotStart: string; slotEnd: string; room?: string | null }[]
+      students: { enrollmentId: string; rollNo: string; name: string; enrollmentNo: string }[]
+      marks: Record<string, boolean>
+      subjects: { id: string; code: string; name: string }[]
+    }>('/faculty/attendance/coordinator/day', { params: { batchId, date } }).then((r) => r.data),
+  coordinatorAttendanceDaySave: (body: { batchId: string; date: string; lectures: { slotId?: string; subjectId: string; marks: Record<string, boolean> }[] }) =>
+    api.post('/faculty/attendance/coordinator/day', body).then((r) => r.data),
   attendanceSummary: () => api.get<{
     semesterLabel: string
     bySubjectAndBatch: { subjectCode: string; batchCode: string; totalStudents: number; avgAttendancePct: number; belowThresholdCount: number; totalLecturesMarked: number }[]

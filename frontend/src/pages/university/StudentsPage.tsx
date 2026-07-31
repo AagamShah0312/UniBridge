@@ -28,7 +28,7 @@ export default function UniversityStudentsPage() {
   const branchesQ = useQuery({ queryKey: ['uni', 'branches'], queryFn: universityApi.branches })
   const q = useQuery({
     queryKey: ['uni', 'students', search, branch, page],
-    queryFn: () => universityApi.students({ search: search || undefined, branch: branch || undefined, page }),
+    queryFn: () => universityApi.students({ search: search || undefined, branch: branch || undefined, page, limit: 10000 }),
   })
   const toggle = useMutation({
     mutationFn: (v: { id: string; isActive: boolean }) => universityApi.setStudentActive(v.id, v.isActive),
@@ -36,7 +36,7 @@ export default function UniversityStudentsPage() {
     onError: (e) => toast.error(errorMessage(e)),
   })
 
-  const sort = useTableSort(q.data?.data ?? [])
+  const sort = useTableSort(q.data?.data ?? [], { pageSize: 20 })
   const th = { activeKey: sort.sortKey, dir: sort.sortDir, onSort: sort.onSort }
 
   return (
@@ -83,9 +83,9 @@ export default function UniversityStudentsPage() {
               ))}
             </tbody>
           </Table>
-          {(q.data?.totalPages ?? 1) > 1 && (
+          {sort.totalPages > 1 && (
             <div className="border-t border-border p-3">
-              <Pagination page={page} totalPages={q.data?.totalPages ?? 1} total={q.data?.total} onPage={setPage} />
+              <Pagination {...sort.pagination} />
             </div>
           )}
         </Card>

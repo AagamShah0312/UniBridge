@@ -1120,6 +1120,191 @@ model PaperCheckAssignment {
   @@map("paper_check_assignments")
 }
 
+// ─────────────────────────────────────────────────────────────
+// EXAMINATION MANAGEMENT MODULE (Year-HOD level)
+//
+// An Exam is a shared examination SESSION (e.g. "T-1 Internal") owned by an
+// academic year + year level. Every HOD of that year works on the same Exam
+// (shared workspace). Student blocks are generated PER HOD (ownerHodId) from
+// that HOD's own students, but every same-year HOD can view/edit them.
+// ─────────────────────────────────────────────────────────────
+
+model Exam {
+  id             String    @id @default(uuid()) @db.Uuid
+  universityId   String    @db.Uuid
+  academicYearId String    @db.Uuid
+  yearLevel      YearLevel // shared-workspace key: all HODs of this year share the exam
+  semesterId     String    @db.Uuid // active semester of the year level
+  phaseId        String?   @db.Uuid // optional T1..T4 link
+  name           String // "T-1 Internal Examination"
+  status         String    @default("DRAFT") // DRAFT | PUBLISHED
+  blockSize      Int       @default(20)
+  bufferMinutes  Int       @default(30)
+  excludeHods    Boolean   @default(false) // if true, HODs are not given supervision duty
+  createdById    String    @db.Uuid
+  publishedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  schedules ExamSchedule[]
+  blocks    ExamBlock[]
+  externals ExternalFaculty[]
+
+  @@index([universityId, academicYearId, yearLevel])
+  @@index([semesterId])
+  @@map("exams")
+}
+
+// One subject exam on a date/time — the "exam calendar" entry. Timing is set
+// before allocation and drives the whole faculty-availability engine.
+model ExamSchedule {
+  id              String   @id @default(uuid()) @db.Uuid
+  examId          String   @db.Uuid
+  subjectId       String   @db.Uuid
+  branch          String? // "IT" — optional filter
+  semesterNumber  Int
+  date            DateTime @db.Date
+  startTime       String // "14:00"
+  endTime         String // "15:15"
+  durationMinutes Int
+  studentCount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  exam        Exam                      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  supervisors SupervisorAllocation[]
+  paperChecks PaperCheckingAllocation[]
+  standbys    StandbyFaculty[]
+
+  @@index([examId, date])
+  @@map("exam_schedules")
+}
+
+// A block of <=20 students in continuous enrollment order. Generated once per
+// session per owning HOD; block numbering is independent per HOD.
+model ExamBlock {
+  id          String   @id @default(uuid()) @db.Uuid
+  examId      String   @db.Uuid
+  ownerHodId  String   @db.Uuid // the HOD whose students fill this block
+  blockNumber Int // independent sequence per HOD
+  room        String?
+  isLocked    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  exam        Exam                   @relation(fields: [examId], references: [id], onDelete: Cascade)
+  students    BlockStudent[]
+  supervisors SupervisorAllocation[]
+
+  @@unique([examId, ownerHodId, blockNumber])
+  @@index([examId])
+  @@map("exam_blocks")
+}
+
+model BlockStudent {
+  id           String @id @default(uuid()) @db.Uuid
+  blockId      String @db.Uuid
+  studentId    String @db.Uuid
+  enrollmentNo String
+  seatOrder    Int
+
+  block ExamBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  @@unique([blockId, studentId])
+  @@index([blockId])
+  @@map("block_students")
+}
+
+// One supervisor per (schedule, block). Either an internal faculty or an
+// external invigilator. `source` records where the faculty came from.
+model SupervisorAllocation {
+  id                String   @id @default(uuid()) @db.Uuid
+  examId            String   @db.Uuid
+  scheduleId        String   @db.Uuid
+  blockId           String   @db.Uuid
+  facultyId         String?  @db.Uuid
+  externalFacultyId String?  @db.Uuid
+  source            String   @default("OWN_YEAR") // OWN_YEAR | OTHER_YEAR | EXTERNAL
+  createdAt         DateTime @default(now())
+
+  schedule ExamSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  block    ExamBlock    @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, blockId])
+  @@index([examId, facultyId])
+  @@index([facultyId])
+  @@map("supervisor_allocations")
+}
+
+// Paper checking is allocated block-wise: each subject faculty gets a
+// continuous range of blocks. blockIds holds the ordered block ids in the range.
+model PaperCheckingAllocation {
+  id         String   @id @default(uuid()) @db.Uuid
+  examId     String   @db.Uuid
+  scheduleId String   @db.Uuid
+  subjectId  String   @db.Uuid
+  facultyId  String   @db.Uuid
+  blockIds   String[] @db.Uuid // ordered, continuous
+  fromLabel  String // "Block 1"
+  toLabel    String // "Block 5"
+  createdAt  DateTime @default(now())
+
+  schedule ExamSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([examId, facultyId])
+  @@index([scheduleId])
+  @@map("paper_checking_allocations")
+}
+
+// 2 standby faculty per subject exam. Subject-specific. Activated manually.
+model StandbyFaculty {
+  id         String   @id @default(uuid()) @db.Uuid
+  examId     String   @db.Uuid
+  scheduleId String   @db.Uuid
+  facultyId  String   @db.Uuid
+  slot       Int // 1 or 2
+  isActive   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  schedule ExamSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, slot])
+  @@index([examId, facultyId])
+  @@map("standby_faculty")
+}
+
+// External invigilators exist only for one examination session.
+model ExternalFaculty {
+  id           String   @id @default(uuid()) @db.Uuid
+  examId       String   @db.Uuid
+  name         String
+  mobile       String?
+  college      String?
+  experience   String?
+  remarks      String?
+  availability String?
+  createdAt    DateTime @default(now())
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@index([examId])
+  @@map("external_faculty")
+}
+
+// Full audit trail of generation, manual edits and publication.
+model ExamAuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  examId    String   @db.Uuid
+  actorId   String   @db.Uuid
+  action    String // GENERATE_BLOCKS | EDIT_SUPERVISION | PUBLISH | ...
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([examId, createdAt])
+  @@map("exam_audit_logs")
+}
+
 // Per-user event notifications (Result Out, Attendance Marked, etc.). Distinct from broadcast Announcements.
 model Notification {
   id           String   @id @default(uuid()) @db.Uuid

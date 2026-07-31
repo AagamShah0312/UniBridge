@@ -24,7 +24,7 @@ export default function FacultyResultsPage() {
 
   const list = useQuery({
     queryKey: ['faculty', 'results', { subjectId, batchId, phase, page }],
-    queryFn: () => facultyApi.results({ subjectId: subjectId || undefined, batchId: batchId || undefined, phase: phase || undefined, page, limit: 20 }),
+    queryFn: () => facultyApi.results({ subjectId: subjectId || undefined, batchId: batchId || undefined, phase: phase || undefined, page, limit: 10000 }),
   })
 
   const subjectOpts = useMemo(() => {
@@ -40,7 +40,7 @@ export default function FacultyResultsPage() {
       .map((a) => ({ value: a.batch.id, label: a.batch.code })) ?? []
   }, [scope.data])
 
-  const sort = useTableSort(list.data?.data ?? [])
+  const sort = useTableSort(list.data?.data ?? [], { pageSize: 20 })
   const th = { activeKey: sort.sortKey, dir: sort.sortDir, onSort: sort.onSort }
 
   return (
@@ -102,9 +102,9 @@ export default function FacultyResultsPage() {
                 ))}
               </tbody>
             </Table>
-            {list.data && (
+            {list.data && sort.totalPages > 1 && (
               <div className="border-t border-border px-3">
-                <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} limit={list.data.limit} onPage={setPage} />
+                <Pagination {...sort.pagination} />
               </div>
             )}
           </>

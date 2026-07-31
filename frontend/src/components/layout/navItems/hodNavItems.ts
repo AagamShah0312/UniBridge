@@ -8,6 +8,7 @@ import {
   ClipboardList,
   LayoutDashboard,
   Megaphone,
+  PenSquare,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -34,6 +35,7 @@ export const hodNavItems: NavSection[] = [
     section: 'Management',
     items: [
       { id: 'exams', label: 'Exam Panel', path: '/hod/exams', icon: ShieldCheck },
+      { id: 'exam-management', label: 'Exam System', path: '/hod/exam-management', icon: PenSquare },
       { id: 'announcements', label: 'Announcements', path: '/hod/announcements', icon: Megaphone },
       { id: 'mentorship', label: 'Mentorship', path: '/hod/mentorship', icon: UserPlus },
       { id: 'analytics', label: 'Analytics', path: '/hod/analytics', icon: Activity },

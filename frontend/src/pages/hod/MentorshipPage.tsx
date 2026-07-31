@@ -45,7 +45,7 @@ export default function MentorshipPage() {
   const mentors = useQuery({ queryKey: ['hod', 'mentorship', 'mentors', semesterId], queryFn: () => hodApi.mentorship.mentors(semesterId), enabled: !!semesterId && tab === 'mentors' })
   const assignments = useQuery({
     queryKey: ['hod', 'mentorship', 'assignments', semesterId, debouncedSearch, page],
-    queryFn: () => hodApi.mentorship.assignments({ semesterId, search: debouncedSearch || undefined, page, limit: 20 }),
+    queryFn: () => hodApi.mentorship.assignments({ semesterId, search: debouncedSearch || undefined, page, limit: 10000 }),
     enabled: !!semesterId && tab === 'assignments',
   })
   const unassigned = useQuery({ queryKey: ['hod', 'mentorship', 'unassigned', semesterId], queryFn: () => hodApi.mentorship.unassigned(semesterId), enabled: !!semesterId && tab === 'unassigned' })
@@ -68,7 +68,7 @@ export default function MentorshipPage() {
     [facultyList.data],
   )
 
-  const aSort = useTableSort(assignments.data?.data ?? [])
+  const aSort = useTableSort(assignments.data?.data ?? [], { pageSize: 20 })
   const aSortTh = { activeKey: aSort.sortKey, dir: aSort.sortDir, onSort: aSort.onSort }
   const uSort = useTableSort(unassigned.data?.data ?? [])
   const uSortTh = { activeKey: uSort.sortKey, dir: uSort.sortDir, onSort: uSort.onSort }
@@ -152,9 +152,9 @@ export default function MentorshipPage() {
                     ))}
                   </tbody>
                 </Table>
-                {assignments.data && (
+                {assignments.data && aSort.totalPages > 1 && (
                   <div className="border-t border-border px-3">
-                    <Pagination page={assignments.data.page} totalPages={assignments.data.totalPages} total={assignments.data.total} limit={assignments.data.limit} onPage={setPage} />
+                    <Pagination {...aSort.pagination} />
                   </div>
                 )}
               </>

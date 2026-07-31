@@ -275,6 +275,14 @@ export const hodApi = {
       api.get<{ phases: T.PhaseTimelineItem[] }>('/hod/calendar/phase-timeline', { params: { semesterId } }).then((r) => r.data),
     export: (academicYearId?: string, format: ExportFormat = 'pdf') =>
       downloadExport('/hod/calendar/export', 'calendar', format, { academicYearId }),
+    template: () => downloadFile('/hod/calendar/template', 'academic-calendar-template.csv'),
+    import: (file: File, replace: boolean) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('replace', String(replace))
+      return api.post<{ imported: number; replaced: boolean; skipped: number; warnings: string[] }>('/hod/calendar/import', fd).then((r) => r.data)
+    },
+    clear: () => api.delete<{ cleared: number }>('/hod/calendar/clear').then((r) => r.data),
   },
 
   // ── Timetable ──

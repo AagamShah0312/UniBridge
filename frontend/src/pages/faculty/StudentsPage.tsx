@@ -41,10 +41,11 @@ export default function FacultyStudentsPage() {
 
   const list = useQuery({
     queryKey: ['faculty', 'students', { search: debounced, batchId, page }],
-    queryFn: () => facultyApi.students({ search: debounced || undefined, batchId: batchId || undefined, page, limit: 20 }),
+    queryFn: () => facultyApi.students({ search: debounced || undefined, batchId: batchId || undefined, page, limit: 10000 }),
   })
 
-  const sort = useTableSort(list.data?.data ?? [])
+  // Fetch all → sort spans every student, then paginate client-side.
+  const sort = useTableSort(list.data?.data ?? [], { pageSize: 20 })
   const th = { activeKey: sort.sortKey, dir: sort.sortDir, onSort: sort.onSort }
 
   return (
@@ -104,9 +105,9 @@ export default function FacultyStudentsPage() {
                 ))}
               </tbody>
             </Table>
-            {list.data && (
+            {list.data && sort.totalPages > 1 && (
               <div className="border-t border-border px-3">
-                <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} limit={list.data.limit} onPage={setPage} />
+                <Pagination {...sort.pagination} />
               </div>
             )}
           </>
